@@ -8,11 +8,13 @@ from src.ui.board import compute_play_rect, draw_board, grid_center
 from src.ui.hud import draw_top_hud, HUD_H
 from src.sprites import make_people_sprite, make_roo_sprite
 
-# ---- feature switches（便于分步联调） ----
-DEBUG_LOG = True
-AI_FACE_ONLY = True        # 先只做“面向对齐”；确认无误再关掉它
-AI_FOLLOW_ENABLED = True   # 允许追随移动
-AI_PUNCH_ENABLED = True    # 允许出拳全流程（含蓄力→命中判定）
+# ---- feature switches: read from global CFG ----
+DEBUG_LOG = CFG.DEBUG
+# “只转身模式”优先生效；一旦开启，移动/出拳都应被抑制
+AI_FACE_ONLY       = CFG.AI_TURN_ONLY_MODE
+AI_FOLLOW_ENABLED  = (CFG.AI_ALLOW_MOVE  and not CFG.AI_TURN_ONLY_MODE)
+AI_PUNCH_ENABLED   = (CFG.AI_ALLOW_PUNCH and not CFG.AI_TURN_ONLY_MODE)
+
 
 # ---- facing enum ----
 R_FACE_LEFT  = -1
@@ -71,6 +73,7 @@ class GameScreen:
         self.roo_punch_until = 0
 
         # Messages
+        self._dbg(f"Flags | face_only={AI_FACE_ONLY}  move={AI_FOLLOW_ENABLED}  punch={AI_PUNCH_ENABLED}")
         self.msg_text, self.msg_color, self.msg_until = "", (255,255,255), 0
         self.popup_kind, self.popup_until = None, 0
 
@@ -126,16 +129,36 @@ class GameScreen:
         return r
 
     def human_rect(self):
-        return self._rect_at(self.human.pos)
+        w = self.play_rect.width // CFG.GRID_W
+        h = self.play_rect.height // CFG.GRID_H
+        cx, cy = grid_center(self.play_rect, *self.human.pos)
+        rw = int(w * CFG.HITBOX_W_RATIO)
+        rh = int(h * CFG.HITBOX_H_RATIO)
+        rect = pg.Rect(0, 0, rw, rh)
+        cy_off = int(h * CFG.HITBOX_Y_OFFSET)  # ↓ 下移（正值）
+        rect.center = (cx, cy + cy_off)
+        return rect
 
     def roo_rect(self):
-        return self._rect_at(self.roo.pos)
+        w = self.play_rect.width // CFG.GRID_W
+        h = self.play_rect.height // CFG.GRID_H
+        cx, cy = grid_center(self.play_rect, *self.roo.pos)
+        rw = int(w * CFG.HITBOX_W_RATIO)
+        rh = int(h * CFG.HITBOX_H_RATIO)
+        rect = pg.Rect(0, 0, rw, rh)
+        cy_off = int(h * CFG.HITBOX_Y_OFFSET)
+        rect.center = (cx, cy + cy_off)
+        return rect
 
     def roo_fist_point(self):
+        # 以“缩小后的命中盒”为基准取拳点，避免贴图边缘的视觉误差
         r = self.roo_rect()
-        y = int(r.top + 0.40 * r.height)
-        pad = max(2, int(0.05 * r.width))
-        x = r.right - pad if self.r_face == R_FACE_RIGHT else r.left + pad
+        y = int(r.top + CFG.FIST_Y_RATIO * r.height)
+        pad = max(2, int(CFG.FIST_EDGE_PAD * r.width))
+        if self.r_face > 0:  # 面向右
+            x = r.right - pad
+        else:  # 面向左
+            x = r.left + pad
         return (x, y)
 
     # ---------- facing helpers ----------
@@ -190,7 +213,6 @@ class GameScreen:
         return True
 
 # ==== B) human input & stamina, punch-commit block ====
-
     def handle_event(self, e):
         if e.type == pg.KEYDOWN:
             if e.key == pg.K_SPACE:
@@ -224,7 +246,7 @@ class GameScreen:
 
         # === 人类移动（连续读键，带冷却与体力） ===
         keys = pg.key.get_pressed()
-        if now - self.last_move_ms >= MOVE_COOLDOWN_MS:
+        if now - self.last_move_ms >= CFG.MOVE_COOLDOWN_MS:
             hx, hy = self.human.pos
             nx, ny = hx, hy
             moved = False
@@ -249,6 +271,9 @@ class GameScreen:
                     moved = True
                     # 玩家移动后立即对齐面向
                     self._face_after_player_moved()
+
+        # --- AI tick every frame ---
+        self._ai_decide(now, dt_sec)
 
         # === 蓄力到点（唯一命中结算点） ===
         if AI_PUNCH_ENABLED and getattr(self, "intend_punch", False) and now >= self.punch_windup_until:
@@ -342,70 +367,69 @@ class GameScreen:
             if not self._safe_move_roo(rx, ry - 1):
                 self._safe_move_roo(rx, ry + 1)
 
-    def _ai_decide(self, now):
-        # 命中硬直/被格挡暂停 → 不行动
-        if now < self.hitstop_until or now < self.ai_pause_until:
+    def _ai_decide(self, now, dt_sec: float):
+        """AI runs every frame: face -> (optionally) punch wind-up or follow."""
+        # hitstop / block-stun pause
+        if now < self.hitstop_until or now < getattr(self, "ai_pause_until", 0):
             return
 
-        # 体力不足 → 休息
+        # stamina rest
         if self.st_r.cur < CFG.ROO_REST_THRESHOLD:
+            self.st_r.cur = min(self.st_r.max, self.st_r.cur + CFG.ST_REGEN_PER_SEC_R * dt_sec)
             return
-
-        if now - self.last_ai_ms < CFG.AI_DECIDE_EVERY_MS:
-            return
-        self.last_ai_ms = now
 
         rx, ry = self.roo.pos
         hx, hy = self.human.pos
         dx, dy = hx - rx, hy - ry
 
-        # 1) 先转向（仅看 X；哪怕相等也不妨再次对齐一次）
+        # 1) always fix facing by X first
         need_face = R_FACE_RIGHT if dx >= 0 else R_FACE_LEFT
         if self.r_face != need_face:
+            self._dbg(f"Face: {self._face_str(self.r_face)} -> {self._face_str(need_face)}")
             self._set_face(need_face)
-            # 面向调整后立即可见（draw 会逐帧翻转）
-            if AI_FACE_ONLY:
-                self._dbg(f"AI face-only: to {self._face_str(self.r_face)}")
-                return  # face-only 模式下直接返回
 
-        # 2) 移动（可开关）
-        if AI_FOLLOW_ENABLED and (dx != 0 or dy != 0):
-            # 优先 X 轴移动 2 格；失败再尝试 Y
+        # respect toggles from config
+        AI_FACE_ONLY = CFG.AI_TURN_ONLY_MODE
+        AI_FOLLOW_EN = CFG.AI_ALLOW_MOVE
+        AI_PUNCH_EN = CFG.AI_ALLOW_PUNCH
+
+        # only-facing mode: stop here
+        if AI_FACE_ONLY:
+            return
+
+        # 2) punch wind-up when adjacent on same row
+        if (AI_PUNCH_EN and dy == 0 and abs(dx) == 1
+                and now - self.last_punch_ms >= CFG.PUNCH_COOLDOWN_MS
+                and not getattr(self, "intend_punch", False)):
+            self.intend_punch = True
+            self.punch_windup_until = now + CFG.PUNCH_WINDUP_MS
+            self._dbg("Wind-up start")
+            return  # hit check will be handled in the 'commit' section already in update()
+
+        # 3) follow (try X first, else Y) every AI_DECIDE_EVERY_MS
+        if AI_FOLLOW_EN and (now - self.last_ai_ms >= CFG.AI_DECIDE_EVERY_MS):
+            self.last_ai_ms = now
             moved = False
-            if dx != 0:
-                step = 2 if dx > 0 else -2
-                moved = self._safe_move_roo(rx + step, ry)
-                if moved:
-                    self.st_r.lose(CFG.ROO_JUMP_ST_DRAIN)
-                    self.sprite_r.set_state("jump")
-                else:
-                    # 试试 Y
-                    if dy != 0:
-                        step_y = 2 if dy > 0 else -2
-                        moved = self._safe_move_roo(rx, ry + step_y)
-                        if moved:
-                            self.st_r.lose(CFG.ROO_JUMP_ST_DRAIN)
-                            self.sprite_r.set_state("jump")
-            else:
-                # dx==0，尝试 Y
-                step_y = 2 if dy > 0 else -2
-                moved = self._safe_move_roo(rx, ry + step_y)
-                if moved:
-                    self.st_r.lose(CFG.ROO_JUMP_ST_DRAIN)
-                    self.sprite_r.set_state("jump")
 
-        # 3) 进入蓄力（仅当相邻、朝向正确、冷却好）
-        if AI_PUNCH_ENABLED:
-            rx, ry = self.roo.pos
-            hx, hy = self.human.pos
-            dx, dy = hx - rx, hy - ry
-            if dy == 0 and abs(dx) == 1 and (now - self.last_punch_ms >= CFG.PUNCH_COOLDOWN_MS):
-                need = R_FACE_RIGHT if dx > 0 else R_FACE_LEFT
-                if self.r_face != need:
-                    self._set_face(need)
-                self.intend_punch = True
-                self.punch_windup_until = now + CFG.PUNCH_WINDUP_MS
-                self._dbg(f"Windup: {CFG.PUNCH_WINDUP_MS}ms")
+            if dx != 0:
+                tx = rx + (2 if dx > 0 else -2)
+                self._dbg(f"FollowX: try ({tx},{ry})")
+                moved = self._safe_move_roo(tx, ry)
+                self._dbg("FollowX: moved" if moved else "FollowX: blocked")
+                if not moved and dy != 0:
+                    ty = ry + (2 if dy > 0 else -2)
+                    self._dbg(f"FollowY(bk): try ({rx},{ty})")
+                    moved = self._safe_move_roo(rx, ty)
+                    self._dbg("FollowY: moved" if moved else "FollowY: blocked")
+            elif dy != 0:
+                ty = ry + (2 if dy > 0 else -2)
+                self._dbg(f"FollowY: try ({rx},{ty})")
+                moved = self._safe_move_roo(rx, ty)
+                self._dbg("FollowY: moved" if moved else "FollowY: blocked")
+
+            if moved:
+                self.st_r.lose(CFG.ROO_JUMP_ST_DRAIN)
+                self.sprite_r.set_state("jump")
 
     def _post_ai_regen(self, dt_sec):
         # 体力回蓝（Roo）
@@ -454,7 +478,6 @@ class GameScreen:
         self._tick_round_timer(now)
 
 # ==== D) draw ====
-
     def draw(self):
         s = self.m.screen
         now = pg.time.get_ticks()
@@ -491,15 +514,37 @@ class GameScreen:
         self.sprite_h.update(dt_ani)
         self.sprite_r.update(dt_ani)
 
-        # 逐帧翻转（立即可见）
-        self.sprite_h.draw(
-            s, grid_center(self.play_rect, *self.human.pos),
-            flip_h=(self.h_face == R_FACE_LEFT),
-        )
-        self.sprite_r.draw(
-            s, grid_center(self.play_rect, *self.roo.pos),
-            flip_h=(self.r_face == R_FACE_LEFT),
-        )
+        # 逐帧翻转
+        # draw by row order: the one in lower row draws later (front)
+        entities = [
+            ("human", self.human.pos, self.sprite_h, (self.h_face < 0)),
+            ("roo", self.roo.pos, self.sprite_r, (self.r_face > 0)),
+        ]
+        entities.sort(key=lambda it: it[1][1])  # sort by grid y
+
+        for name, pos, spr, flip in entities:
+            spr.draw(s, grid_center(self.play_rect, *pos), flip_h=flip)
+
+        # 可视化调试：看见命中盒与拳点是否贴合
+        if CFG.DEBUG:
+            # draw hitboxes
+            pg.draw.rect(s, (60, 200, 120), self.human_rect(), 2)  # human box
+            pg.draw.rect(s, (200, 170, 60), self.roo_rect(), 2)  # roo box
+            # draw fist point
+            fx, fy = self.roo_fist_point()
+            pg.draw.circle(s, (230, 80, 80), (fx, fy), 5, 0)
+
+        # # human
+        # self.sprite_h.draw(
+        #     s, grid_center(self.play_rect, *self.human.pos),
+        #     flip_h=(self.h_face == R_FACE_LEFT),
+        # )
+        #
+        # # Base sprite faces LEFT by default; we flip when facing RIGHT.
+        # self.sprite_r.draw(
+        #     s, grid_center(self.play_rect, *self.roo.pos),
+        #     flip_h=(self.r_face > 0),
+        # )
 
         # 中央提示
         if now < getattr(self, "msg_until", 0) and getattr(self, "msg_text", ""):

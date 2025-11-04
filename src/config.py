@@ -19,6 +19,15 @@ class _CFG:
     GRID_LIGHT: tuple = COL_GRID_LIGHT
     GRID_DARK:  tuple = COL_GRID_DARK
 
+    # --- Hitbox & fist tuning (industry-ish defaults) ---
+    # 更窄更矮的命中盒，减少“左右够不到/上下踩头”错觉
+    HITBOX_W_RATIO: float = 0.48  # ← 横向更窄（0.45~0.55可自行微调）
+    HITBOX_H_RATIO: float = 0.82  # ← 纵向略矮（0.78~0.86可微调）
+    HITBOX_Y_OFFSET: float = +0.06  # ← 命中盒中心整体下移6%，减少上下重叠感
+    # 拳点：离上边更近，离面朝边更远，避免“空气击中”
+    FIST_Y_RATIO: float = 0.34  # 取命中盒高度的上34%处采样拳点
+    FIST_EDGE_PAD: float = 0.18  # 距离命中盒边缘18%内收，贴近拳套处
+
     # --- Gameplay timing ---
     FPS: int = 60
     ROUND_SECONDS: int = 45
@@ -66,7 +75,7 @@ class _CFG:
 
     # --- Debug & control toggles ---
     DEBUG: bool = True                    # print simple english logs to console
-    AI_TURN_ONLY_MODE: bool = True        # <<< TEMP: only face the player, do not move/punch
+    AI_TURN_ONLY_MODE: bool = False        # <<< TEMP: only face the player, do not move/punch
     AI_ALLOW_MOVE: bool = True            # master switch for moving when we re-enable
     AI_ALLOW_PUNCH: bool = True           # master switch for punch when we re-enable
 

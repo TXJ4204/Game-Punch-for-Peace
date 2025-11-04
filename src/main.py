@@ -34,7 +34,7 @@ def main():
         pass
 
     screen = pg.display.set_mode((WIN_W, WIN_H), pg.SCALED)
-    pg.display.set_caption("Kangaroo vs Human — MVP")
+    pg.display.set_caption("PUNCH for PEACE")
     clock = pg.time.Clock()
 
     fonts = {
