@@ -1,67 +1,154 @@
 # src/screen/screen_single_info.py
+from pathlib import Path
 import pygame as pg
 from src.config import CFG
 from src.widgets import Button
 
-def draw_panel(surf, rect, fill=(55, 60, 70), outline=(25, 28, 34)):
-    pg.draw.rect(surf, fill, rect, border_radius=14)
-    pg.draw.rect(surf, outline, rect, 2, border_radius=14)
 
-def human_icon(surf, rect, color=(80, 160, 240)):
-    cx, cy = rect.centerx, rect.centery
-    bw, bh = rect.width * 0.22, rect.height * 0.45
-    body = pg.Rect(0, 0, bw, bh); body.center = (cx, cy + rect.height * 0.06)
-    head_r = int(bw * 0.55)
-    pg.draw.rect(surf, color, body, border_radius=10)
-    pg.draw.circle(surf, color, (int(cx), int(body.top - head_r * 0.6)), head_r)
+class L:
+    # —— 整体布局 —— #
+    PANEL_TOP        = 120
+    PANEL_MARGINS    = 80
+    PANEL_GAP_X      = 50
+    PANEL_BOTTOM_PAD = 160
+    INNER_PAD        = 22
+
+    # 左右比例：左:右 = 1:2
+    LEFT_RIGHT_RATIO = (1, 2.5)
+
+    # 边框
+    PANEL_RADIUS     = 14
+    PANEL_BORDER_W   = 3
+
+    # 页面左上“Single Player”小标题
+    PAGE_TITLE_POS   = (28, 24)   # topleft
+    PAGE_TITLE_FONT  = "mid"      # 用较小字号
+
+    # 左卡内部
+    LEFT_TITLE_GAP   = 18          # 左卡 Mode 标题离内框顶的距离
+    IMG_REL_PATH     = "assets/animation/people01.png"
+    IMG_MAX_H_RATIO  = 0.58        # 左卡内框高的比例
+    IMG_SCALE        = 1.00
+    IMG_BASELINE_GAP = 120         # 人物底边距 Enter 顶部的距离（越大越靠上）
+
+    # 右卡标题（放在外框外！）
+    HOWTO_TITLE_FONT = "big"
+    HOWTO_TITLE_GAP  = 38          # 标题到底下外框顶的距离
+
+    # 右卡两列
+    COL_GUTTER       = 40          # 列间距
+    COL_TOP_PAD      = 18          # 内容区顶部内边距（inside panel）
+    COL_SIDE_PAD     = 20          # 内容左右内边距
+    HEADING_FONT     = "mid"       # “# Game Rules #” 这行
+    BODY_FONT        = "sml"       # 子弹行
+    LINE_SPACING     = 1.20        # 行距
+    BULLET_GAP       = 6           # 同一段落相邻子弹的额外间距
+
+    # 按钮
+    ENTER_SIZE       = (300, 58)
+    BACK_POS         = (24, -64)
+
+
+def draw_panel(surf, rect):
+    pg.draw.rect(surf, CFG.COL_PANEL_BG, rect, border_radius=L.PANEL_RADIUS)
+    pg.draw.rect(surf, CFG.COL_PANEL_OUTLINE, rect, width=L.PANEL_BORDER_W, border_radius=L.PANEL_RADIUS)
+
 
 def wrap_text(text, font, max_width):
-    """
-    Return a list of lines wrapped to max_width using font metrics.
-    Keeps words; falls back to char-split if a single word exceeds width.
-    """
-    words = text.split(' ')
-    lines, cur = [], ""
+    words, lines, cur = text.split(' '), [], ""
     for w in words:
         test = (cur + " " + w).strip()
         if font.size(test)[0] <= max_width:
             cur = test
         else:
             if cur: lines.append(cur)
-            # a single super-long word: hard wrap
-            if font.size(w)[0] > max_width:
-                buf = ""
-                for ch in w:
-                    if font.size(buf + ch)[0] <= max_width:
-                        buf += ch
-                    else:
-                        lines.append(buf)
-                        buf = ch
-                cur = buf
-            else:
-                cur = w
+            cur = w
     if cur: lines.append(cur)
     return lines
+
 
 class SingleInfoScreen:
     def __init__(self, manager):
         self.m = manager
         self.W, self.H = manager.size
 
-        self.btn_enter = Button(pg.Rect(self.W // 2 - 140, self.H - 84, 280, 54),
-                                "Enter", self.m.fonts["big"])
-        self.btn_back  = Button(pg.Rect(24, self.H - 64, 140, 40),
-                                "Back", self.m.fonts["mid"])
+        # —— 外框：左:右=1:2 —— #
+        usable_w = self.W - L.PANEL_MARGINS * 2
+        left_r, right_r = L.LEFT_RIGHT_RATIO
+        w_unit = (usable_w - L.PANEL_GAP_X) / (left_r + right_r)
+        left_w  = int(w_unit * left_r)
+        right_w = int(w_unit * right_r)
+        col_h   = self.H - L.PANEL_TOP - L.PANEL_BOTTOM_PAD
 
-    def _draw_full_grid(self):
+        self.left_outer  = pg.Rect(L.PANEL_MARGINS, L.PANEL_TOP, left_w, col_h)
+        self.right_outer = pg.Rect(L.PANEL_MARGINS + left_w + L.PANEL_GAP_X, L.PANEL_TOP, right_w, col_h)
+
+        # 内框（内容用）
+        self.left_inner  = self.left_outer.inflate(-L.INNER_PAD * 2, -L.INNER_PAD * 2)
+        self.right_inner = self.right_outer.inflate(-L.INNER_PAD * 2, -L.INNER_PAD * 2)
+
+        # 页面左上小标题
+        self.page_title = self.m.fonts[L.PAGE_TITLE_FONT].render("Single Player", True, CFG.COL_TEXT)
+
+        # 左卡标题
+        self.left_head  = self.m.fonts["big"].render("Mode", True, CFG.COL_TEXT)
+
+        # 右卡外部标题
+        self.howto_head = self.m.fonts[L.HOWTO_TITLE_FONT].render("How to Play", True, CFG.COL_TEXT)
+
+        # 两列文本
+        self.rules_heading = "# Game Rules #"
+        self.rules_lines = [
+            "Kangaroo jumps 2 steps fast but tires quickly.",
+            "Human walks 1 step and can only defend.",
+            "When Roo is within 1 tile, it punches automatically.",
+            "Round lasts 3 min; 2 hearts; lose half when knocked down.",
+            "Out of stamina → lose.",
+        ]
+        self.core_heading = "# Core Mechanics #"
+        self.core_lines = [
+            "Duel of walking vs jumping.",
+            "Block reduces damage but drains both sides.",
+            "Roo’s jump consumes extra stamina.",
+            "Keep >1 tile to dodge punches.",
+            "[Arrow] Move   [Space] Block",
+        ]
+
+        # 图片
+        try:
+            here = Path(__file__).resolve().parent
+            img_path = (here.parent.parent / L.IMG_REL_PATH).resolve()
+            self._img = pg.image.load(str(img_path)).convert_alpha()
+        except Exception:
+            self._img = None
+
+        # 按钮
+        ew, eh = L.ENTER_SIZE
+        self.btn_enter = Button(pg.Rect(self.W // 2 - ew // 2, self.H - 84, ew, eh),
+                                "Enter", self.m.fonts["big"])
+        bx, by = L.BACK_POS
+        self.btn_back = Button(pg.Rect(24, self.H + by, 140, 40),
+                               "Back", self.m.fonts["mid"])
+
+        # 左图几何
+        self.img_target_h = int(self.left_inner.height * L.IMG_MAX_H_RATIO)
+        self.img_baseline = self.btn_enter.rect.top - L.IMG_BASELINE_GAP
+
+    def _draw_grid(self, s):
         COLS, ROWS = 16, 9
-        cell_w = self.W // COLS
-        cell_h = self.H // ROWS
+        cw, ch = self.W // COLS, self.H // ROWS
         for r in range(ROWS):
             for c in range(COLS):
-                rect = pg.Rect(c * cell_w, r * cell_h, cell_w, cell_h)
-                col = CFG.GRID_LIGHT if (c + r) % 2 == 0 else CFG.GRID_DARK
-                pg.draw.rect(self.m.screen, col, rect)
+                col = CFG.GRID_LIGHT if (r + c) % 2 == 0 else CFG.GRID_DARK
+                pg.draw.rect(s, col, (c * cw, r * ch, cw, ch))
+
+    def _draw_img_bottom(self, surf, img, cx, baseline_y, target_h, scale=1.0):
+        if not img: return
+        w, h = img.get_size()
+        th = int(target_h * scale)
+        sc = th / h
+        simg = pg.transform.smoothscale(img, (int(w * sc), th))
+        surf.blit(simg, simg.get_rect(centerx=cx, bottom=baseline_y))
 
     def handle_event(self, e):
         if self.btn_enter.handle_event(e) or (e.type == pg.KEYDOWN and e.key == pg.K_RETURN):
@@ -75,62 +162,70 @@ class SingleInfoScreen:
     def draw(self):
         s = self.m.screen
         s.fill(CFG.BG)
-        self._draw_full_grid()
+        self._draw_grid(s)
 
-        # Title
-        title = self.m.fonts["title"].render("Single Player", True, CFG.TEXT)
-        s.blit(title, title.get_rect(center=(self.W // 2, 72)))
+        # 页面左上小标题
+        s.blit(self.page_title, self.page_title.get_rect(topleft=L.PAGE_TITLE_POS))
 
-        # Panels
-        left  = pg.Rect(48, 120, self.W // 2 - 72, self.H - 220)
-        right = pg.Rect(self.W // 2 + 24, 120, self.W // 2 - 72, self.H - 220)
-        draw_panel(s, left); draw_panel(s, right)
+        # 外框
+        draw_panel(s, self.left_outer)
+        draw_panel(s, self.right_outer)
 
-        # Left: Mode + icon
-        hdr = self.m.fonts["big"].render("Mode", True, CFG.TEXT)
-        s.blit(hdr, hdr.get_rect(center=(left.centerx, left.top + 26)))
-        # Ensure proper padding for the graphic within the panel
-        icon_rect = left.inflate(-left.width * 0.5, -left.height * 0.45)
-        human_icon(s, icon_rect)
+        # 右侧 “How to Play” 在外框上方
+        howto_pos = self.howto_head.get_rect(center=(self.right_outer.centerx,
+                                                     self.right_outer.top - L.HOWTO_TITLE_GAP))
+        s.blit(self.howto_head, howto_pos)
 
-        # Right: How to Play (wrapped bullets)
-        hdr2 = self.m.fonts["big"].render("How to Play", True, CFG.TEXT)
-        s.blit(hdr2, hdr2.get_rect(center=(right.centerx, right.top + 26)))
+        # 左卡标题：放左上角
+        s.blit(self.left_head, self.left_head.get_rect(
+            topleft=(self.left_inner.left + L.INNER_PAD, self.left_inner.top + L.LEFT_TITLE_GAP))
+        )
+        # 左卡人物
+        self._draw_img_bottom(
+            s, self._img,
+            self.left_inner.centerx,
+            self.img_baseline,
+            self.img_target_h,
+            L.IMG_SCALE
+        )
 
-        pad = 24
-        wrap_width = right.width - pad * 2
-        y = right.top + 74
-        line_h = int(self.m.fonts["mid"].get_linesize() * 1.15)
+        # 右卡两列内容排版
+        font_head = self.m.fonts[L.HEADING_FONT]
+        font_body = self.m.fonts[L.BODY_FONT]
+        line_h = int(font_body.get_linesize() * L.LINE_SPACING)
 
-        bullets = [
-            "Move with Arrow keys (1 cell each).",
-            "Hold Space to Block (both lose a bit of stamina; reduced damage).",
-            "Stay more than 1 cell away to avoid punches.",
-            "Exploit Roo's 2-cell jump to bait whiffs.",
-            "[Backspace] Back to Mode    [Enter] Start Game",
-        ]
+        # 列区域
+        content = self.right_inner.inflate(-L.COL_SIDE_PAD * 2, -L.COL_TOP_PAD * 2)
+        col_w = (content.width - L.COL_GUTTER) // 2
+        col_left  = pg.Rect(content.left,  content.top, col_w, content.height)
+        col_right = pg.Rect(content.left + col_w + L.COL_GUTTER, content.top, col_w, content.height)
 
-        for t in bullets:
-            lines = wrap_text(t, self.m.fonts["mid"], wrap_width)
-            # Draw a bullet dot at the start of each item (dot on the first wrapped line only)
-            if lines:
-                dot = self.m.fonts["mid"].render("• ", True, CFG.TEXT)
-                s.blit(dot, (right.left + pad, y))
-                x0 = right.left + pad + dot.get_width()
-                # First line
-                img = self.m.fonts["mid"].render(lines[0], True, CFG.TEXT)
-                s.blit(img, (x0, y)); y += line_h
-                # Continuation lines (no dot; align with text)
-                for cont in lines[1:]:
-                    img2 = self.m.fonts["mid"].render(cont, True, CFG.TEXT)
-                    s.blit(img2, (right.left + pad + dot.get_width(), y))
+        # 画一列
+        def draw_column(rect, heading_text, items):
+            y = rect.top
+            # heading
+            head_img = font_head.render(heading_text, True, CFG.COL_TEXT)
+            s.blit(head_img, head_img.get_rect(topleft=(rect.left, y)))
+            y += head_img.get_height() + 12
+            # bullets
+            wrap_w = rect.width
+            for t in items:
+                lines = wrap_text(t, font_body, wrap_w)
+                if lines:
+                    # dot + first line
+                    dot = font_body.render("• ", True, CFG.COL_TEXT)
+                    s.blit(dot, (rect.left, y))
+                    x0 = rect.left + dot.get_width()
+                    s.blit(font_body.render(lines[0], True, CFG.COL_TEXT), (x0, y))
                     y += line_h
-            y += 6  # Add small spacing between bullet items
+                    for cont in lines[1:]:
+                        s.blit(font_body.render(cont, True, CFG.COL_TEXT), (x0, y))
+                        y += line_h
+                y += L.BULLET_GAP
 
-            # Prevent overflow: stop rendering when reaching panel bottom
-            if y > right.bottom - pad:
-                break
+        draw_column(col_left,  self.rules_heading, self.rules_lines)
+        draw_column(col_right, self.core_heading,  self.core_lines)
 
-        # Buttons
+        # 按钮
         self.btn_back.draw(s)
         self.btn_enter.draw(s)

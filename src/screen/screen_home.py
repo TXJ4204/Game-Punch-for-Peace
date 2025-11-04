@@ -8,22 +8,21 @@ class HomeScreen:
         self.m = manager
         self.W, self.H = manager.size
 
-        # ---- 文案 ----
+        # ---- Text ----
         self.title    = "PUNCH for PEACE"
         self.subtitle = "- human VS kangaroo -"
 
-        # ---- 字体：标题更大 + 加粗 ----
-        # 若你的 Font 支持 set_bold，则直接加粗；否则保持原字体
+        # ---- Font: larger title + bold ----
         self.title_font = self.m.fonts.get("title", self.m.fonts["big"])
         try:
-            self.title_font.set_bold(True)   # 有些字体可用
+            self.title_font.set_bold(True)   # some fonts support this
         except Exception:
             pass
 
-        # 标题再放大一点（在没有独立大号字体时）
+        # Enlarge title a bit more (when no separate large font is available)
         self.title_font_big = self.title_font
         try:
-            # 尝试用系统字体生成更大的标题字体
+            # Try to generate a larger title font using system font
             size = int(self.title_font.get_height() * 2)
             self.title_font_big = pg.font.SysFont(None, size, bold=True)
         except Exception:
@@ -32,31 +31,31 @@ class HomeScreen:
         self.sub_font = self.m.fonts.get("subtitle", self.m.fonts.get("big"))
         self.sub_col  = (170, 170, 170)
 
-        # ---- 按钮：更小，边线更细 ----
-        self.btn_size = (220, 60)   # 之前 360x84，现在更小
+        # ---- Button: smaller, thinner border ----
+        self.btn_size = (220, 60)   # previously 360x84, now smaller
         btn_rect = pg.Rect(0, 0, *self.btn_size)
         self.btn_start = Button(btn_rect, "start", self.m.fonts["big"])
-        # 如果 Button 支持自定义边线/圆角，尽量调细
+        # If Button supports custom border/radius, make it thinner
         for attr, val in [("border_w", 0), ("radius", 14)]:
             if hasattr(self.btn_start, attr):
                 setattr(self.btn_start, attr, val)
 
-        # ---- 计算垂直布局 a（整体居中）----
+        # ---- Calculate vertical layout a (centered) ----
         self._layout_a()
 
     def _layout_a(self):
-        # 量一下三块的高度
+        # Measure heights of three blocks
         title_h = self.title_font_big.size(self.title)[1]
         sub_h   = self.sub_font.size(self.subtitle)[1]
         btn_h   = self.btn_start.rect.height
 
-        gap1, gap2 = 18, 120  # 标题-副标题、 副标题-按钮 的间距
+        gap1, gap2 = 18, 120  # spacing between title-subtitle and subtitle-button
         total_h = title_h + gap1 + sub_h + gap2 + btn_h
 
-        start_y = (self.H - total_h) // 2 + 40  # “布局 a” 顶部 y（垂直居中）  加偏移
-        cx = self.W // 2 + 0                   # 居中对齐
+        start_y = (self.H - total_h) // 2 + 40  # “layout a” top y (vertically centered) + offset
+        cx = self.W // 2 + 0                   # center alignment
 
-        # 逐项定位
+        # Position each element
         self.title_pos = (cx, start_y + title_h // 2)
         self.sub_pos   = (cx, self.title_pos[1] + title_h // 2 + gap1 + sub_h // 2)
 
@@ -78,7 +77,7 @@ class HomeScreen:
             self.m.goto("mode")
 
     def update(self, dt):
-        # 窗口大小变化时可重算布局（如果你有自适应窗口）
+        # Recalculate layout when window size changes (if you have adaptive window)
         pass
 
     def draw(self):

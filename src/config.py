@@ -13,6 +13,22 @@ class _CFG:
     COL_GRID_LIGHT: tuple = (62, 68, 78)  # board light
     COL_GRID_DARK:  tuple = (48, 54, 63)  # board dark
 
+    # config.py 里的 CFG 颜色建议
+    COL_PANEL_BG = (55, 60, 70)
+    COL_PANEL_OUTLINE = (25, 28, 34)
+    COL_PANEL_OUTLINE_HI = (70, 130, 200)  # 选中边框蓝
+    COL_TEXT02 = (230, 235, 238)
+    COL_TIP = (190, 190, 195)
+    COL_ICON_SINGLE = (80, 160, 240)
+    COL_ICON_MULTI = (150, 150, 160)
+
+    COL_CONFIRM_FILL = (80, 140, 200)
+    COL_CONFIRM_TEXT = (245, 247, 250)
+    COL_CONFIRM_BORDER = (22, 30, 38)
+    COL_CONFIRM_FILL_DIS = (128, 128, 132)
+    COL_CONFIRM_TEXT_DIS = (20, 20, 22)
+    COL_CONFIRM_BORDER_DIS = (35, 35, 38)
+
     # Backward-compat
     TEXT: tuple = COL_TEXT
     BG:   tuple = COL_BG
