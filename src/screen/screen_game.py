@@ -128,38 +128,40 @@ class GameScreen:
         r.center = (int(cx), int(cy))
         return r
 
-    def human_rect(self):
-        w = self.play_rect.width // CFG.GRID_W
-        h = self.play_rect.height // CFG.GRID_H
-        cx, cy = grid_center(self.play_rect, *self.human.pos)
-        rw = int(w * CFG.HITBOX_W_RATIO)
-        rh = int(h * CFG.HITBOX_H_RATIO)
-        rect = pg.Rect(0, 0, rw, rh)
-        cy_off = int(h * CFG.HITBOX_Y_OFFSET)  # ↓ 下移（正值）
-        rect.center = (cx, cy + cy_off)
-        return rect
+    def human_rect(self, center_xy: tuple[int, int] | None = None):
+        """Return human's yellow bbox (screen-space) of current frame."""
+        if center_xy is None:
+            center_xy = grid_center(self.play_rect, *self.human.pos)
+        flip = (self.h_face < 0)
+        return self.sprite_h.bbox_rect(center_xy, flip_h=flip)
 
-    def roo_rect(self):
-        w = self.play_rect.width // CFG.GRID_W
-        h = self.play_rect.height // CFG.GRID_H
-        cx, cy = grid_center(self.play_rect, *self.roo.pos)
-        rw = int(w * CFG.HITBOX_W_RATIO)
-        rh = int(h * CFG.HITBOX_H_RATIO)
-        rect = pg.Rect(0, 0, rw, rh)
-        cy_off = int(h * CFG.HITBOX_Y_OFFSET)
-        rect.center = (cx, cy + cy_off)
-        return rect
+    def roo_rect(self, center_xy: tuple[int, int] | None = None):
+        """Return roo's yellow bbox (screen-space) of current frame."""
+        if center_xy is None:
+            center_xy = grid_center(self.play_rect, *self.roo.pos)
+        flip = (self.r_face > 0)  # 我们袋鼠朝右要翻转
+        return self.sprite_r.bbox_rect(center_xy, flip_h=flip)
 
     def roo_fist_point(self):
-        # 以“缩小后的命中盒”为基准取拳点，避免贴图边缘的视觉误差
-        r = self.roo_rect()
-        y = int(r.top + CFG.FIST_Y_RATIO * r.height)
-        pad = max(2, int(CFG.FIST_EDGE_PAD * r.width))
-        if self.r_face > 0:  # 面向右
-            x = r.right - pad
-        else:  # 面向左
-            x = r.left + pad
-        return (x, y)
+        """
+        Pixel-accurate fist anchor from JSON (punchL/punchR), scaled & flipped.
+        """
+        center = grid_center(self.play_rect, *self.roo.pos)
+        flip = (self.r_face > 0)  # 我们的袋鼠朝右时翻转绘制
+        return self.sprite_r.fist_point(center, flip_h=flip)
+
+    def _centers_screen(self) -> tuple[tuple[int,int], tuple[int,int]]:
+        """
+        Return (human_center, roo_center) in screen coords.
+        Centers are snapped (using yellow bbox) to eliminate visual gap
+        when they stand adjacent on the same row.
+        """
+        base_h = grid_center(self.play_rect, *self.human.pos)
+        base_r = grid_center(self.play_rect, *self.roo.pos)
+        h_c, r_c = self._centers_face_to_face_snap(base_h, base_r)
+        self._last_centers = (h_c, r_c)
+        return h_c, r_c
+
 
     # ---------- facing helpers ----------
     def _face_str(self, f): return "Right" if f == R_FACE_RIGHT else "Left"
@@ -289,10 +291,22 @@ class GameScreen:
             self.roo_punch_until = now + CFG.PUNCH_ANIM_MS
             self.last_punch_ms = now
 
-            # 命中条件：同一行相邻 + 面向正确 + 拳点进命中盒
+            # 命中条件：同一行相邻 + 面向正确 + 拳点落在人像素mask上
+            # 命中条件：同一行相邻 + 面向正确 + 拳点落在人像素mask上
             hit_ok = can_punch(self.roo.pos, self.human.pos, self.r_face)
             if hit_ok:
-                hit_ok = self.human_rect().collidepoint(self.roo_fist_point())
+                # 用与 draw 完全一致的“贴边后中心”
+                h_center, r_center = self._centers_screen()
+                # 人物像素掩码（含翻转）
+                h_flip = (self.h_face < 0)
+                h_mask, h_rect = self.sprite_h.mask_and_rect(h_center, flip_h=h_flip)
+                # 拳点（基于当前帧、r_center、含翻转）
+                fx, fy = self.sprite_r.fist_point(r_center, flip_h=(self.r_face > 0))
+                # 拳点是否打在人像素（mask=1）
+                if 0 <= (fx - h_rect.x) < h_rect.w and 0 <= (fy - h_rect.y) < h_rect.h:
+                    hit_ok = bool(h_mask.get_at((fx - h_rect.x, fy - h_rect.y)))
+                else:
+                    hit_ok = False
 
             # 闪避保护
             if hit_ok and (now - getattr(self, "last_human_step_ms", -999999)) <= CFG.EVADE_GRACE_MS:
@@ -304,27 +318,17 @@ class GameScreen:
                 self._dbg("Punch result: whiff -> short pause")
                 return
 
-            # 命中三分支
-            parry = self.blocking and (0 <= (now - self.last_block_down_ms) <= CFG.PARRY_WINDOW_MS)
-            if parry:
-                self._dbg("Punch result: PARRY")
-                try: self.sfx.get("block", None) and self.sfx["block"].play()
-                except: pass
-                self._set_center_msg("PARRY!", (240,255,240))
-                self.st_r.lose(CFG.PUNCH_DAMAGE * 0.6)
-                self.hitstop_until = now + HITSTOP_MS
-                self._roo_step_back()
-                self.ai_pause_until = now + (CFG.BLOCK_RECOVER_MS + 160)
-                return
-
+            # 命中两分支（简化）：BLOCK or HIT
             if self.blocking:
                 self._dbg("Punch result: BLOCK")
-                try: self.sfx.get("block", None) and self.sfx["block"].play()
-                except: pass
+                try:
+                    self.sfx.get("block", None) and self.sfx["block"].play()
+                except:
+                    pass
                 self.hp_h.lose(CFG.PUNCH_BLOCKED_DAMAGE)
                 self.st_r.lose(CFG.BLOCK_SHARED_LOSS)
                 self.st_h.lose(CFG.BLOCK_SHARED_LOSS * 0.5)
-                self._set_center_msg("BLOCK!", (230,230,230))
+                self._set_center_msg("BLOCK!", (230, 230, 230))
                 self.hitstop_until = now + HITSTOP_MS
                 self._roo_step_back()
                 self.ai_pause_until = now + CFG.BLOCK_RECOVER_MS
@@ -333,10 +337,12 @@ class GameScreen:
 
             # 直击
             self._dbg("Punch result: HIT")
-            try: self.sfx.get("hit", None) and self.sfx["hit"].play()
-            except: pass
+            try:
+                self.sfx.get("hit", None) and self.sfx["hit"].play()
+            except:
+                pass
             self.hp_h.lose(CFG.PUNCH_DAMAGE)
-            self._set_center_msg(f"-{CFG.PUNCH_DAMAGE} HP", (240,120,120))
+            self._set_center_msg(f"-{CFG.PUNCH_DAMAGE} HP", (240, 120, 120))
             self.hitstop_until = now + HITSTOP_MS
             self.score_r += 1
 
@@ -477,6 +483,46 @@ class GameScreen:
         self._check_overlap_fix()
         self._tick_round_timer(now)
 
+    def _centers_face_to_face_snap(self, base_h_cxy, base_r_cxy):
+        """
+        输入：按 grid_center 得到的人与袋鼠中心 (cx,cy)
+        输出：在同排相邻时，沿 X 方向把两者的“黄色 bbox”贴近（消掉视觉缝隙）的中心点。
+        """
+        hx, hy = self.human.pos
+        rx, ry = self.roo.pos
+
+        # 只处理同一行 & 相邻格
+        if hy != ry or abs(hx - rx) != 1:
+            return base_h_cxy, base_r_cxy
+
+        # 计算当前帧下的 bbox（屏幕坐标）
+        h_bbox = self.sprite_h.bbox_rect(base_h_cxy, flip_h=(self.h_face < 0))
+        r_bbox = self.sprite_r.bbox_rect(base_r_cxy, flip_h=(self.r_face < 0))
+
+        # 计算间隙：左人右roo 或 左roo右人
+        # 约定 idx：左侧实体的 bbox.right 与 右侧实体的 bbox.left
+        if hx < rx:
+            gap = r_bbox.left - h_bbox.right
+            left_is_human = True
+        else:
+            gap = h_bbox.left - r_bbox.right
+            left_is_human = False
+
+        # 仅在“gap>0（有缝）”时贴近；重叠或刚好相切不动
+        if gap > 0:
+            # 平分移动，留 1px 余量防止闪烁
+            move_each = max(0, (gap - 1) // 2)
+            if move_each > 0:
+                if left_is_human:
+                    base_h_cxy = (base_h_cxy[0] + move_each, base_h_cxy[1])
+                    base_r_cxy = (base_r_cxy[0] - move_each, base_r_cxy[1])
+                else:
+                    base_h_cxy = (base_h_cxy[0] - move_each, base_h_cxy[1])
+                    base_r_cxy = (base_r_cxy[0] + move_each, base_r_cxy[1])
+
+        return base_h_cxy, base_r_cxy
+
+
 # ==== D) draw ====
     def draw(self):
         s = self.m.screen
@@ -514,37 +560,26 @@ class GameScreen:
         self.sprite_h.update(dt_ani)
         self.sprite_r.update(dt_ani)
 
-        # 逐帧翻转
-        # draw by row order: the one in lower row draws later (front)
+        # 逐帧：先取“贴边后中心”，保证视觉无缝
+        h_center, r_center = self._centers_screen()
+
+        # 行排序（谁在下面谁在前）
         entities = [
-            ("human", self.human.pos, self.sprite_h, (self.h_face < 0)),
-            ("roo", self.roo.pos, self.sprite_r, (self.r_face > 0)),
+            ("human", h_center, self.sprite_h, (self.h_face < 0)),
+            ("roo",   r_center, self.sprite_r, (self.r_face > 0)),
         ]
-        entities.sort(key=lambda it: it[1][1])  # sort by grid y
+        # 仍按网格的 y 排序（不变）
+        entities.sort(key=lambda it: it[1][1])
 
-        for name, pos, spr, flip in entities:
-            spr.draw(s, grid_center(self.play_rect, *pos), flip_h=flip)
+        for _, cxy, spr, flip in entities:
+            spr.draw(s, cxy, flip_h=flip)
 
-        # 可视化调试：看见命中盒与拳点是否贴合
+        # Debug：看 bbox 与拳点
         if CFG.DEBUG:
-            # draw hitboxes
-            pg.draw.rect(s, (60, 200, 120), self.human_rect(), 2)  # human box
-            pg.draw.rect(s, (200, 170, 60), self.roo_rect(), 2)  # roo box
-            # draw fist point
-            fx, fy = self.roo_fist_point()
+            pg.draw.rect(s, (60, 200, 120), self.human_rect(h_center), 2)  # human bbox
+            pg.draw.rect(s, (200, 170, 60),  self.roo_rect(r_center),   2)  # roo bbox
+            fx, fy = self.sprite_r.fist_point(r_center, flip_h=(self.r_face > 0))
             pg.draw.circle(s, (230, 80, 80), (fx, fy), 5, 0)
-
-        # # human
-        # self.sprite_h.draw(
-        #     s, grid_center(self.play_rect, *self.human.pos),
-        #     flip_h=(self.h_face == R_FACE_LEFT),
-        # )
-        #
-        # # Base sprite faces LEFT by default; we flip when facing RIGHT.
-        # self.sprite_r.draw(
-        #     s, grid_center(self.play_rect, *self.roo.pos),
-        #     flip_h=(self.r_face > 0),
-        # )
 
         # 中央提示
         if now < getattr(self, "msg_until", 0) and getattr(self, "msg_text", ""):

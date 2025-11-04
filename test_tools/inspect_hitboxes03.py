@@ -1,4 +1,4 @@
-# tools/inspect_hitboxes02.py
+# test_tools/inspect_hitboxes02.py
 # Fixed "02" inspector: saves JSON that matches sprites.py expectations
 # - tight bbox   -> "bbox": [x,y,w,h]   (image-space)
 # - hit rect     -> "parts": [{"x":...,"y":...,"w":...,"h":...}]   (image-space)

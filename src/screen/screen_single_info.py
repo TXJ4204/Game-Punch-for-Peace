@@ -6,45 +6,45 @@ from src.widgets import Button
 
 
 class L:
-    # —— 整体布局 —— #
+    # —— 外层布局 —— #
     PANEL_TOP        = 120
     PANEL_MARGINS    = 80
     PANEL_GAP_X      = 50
     PANEL_BOTTOM_PAD = 160
     INNER_PAD        = 22
-
-    # 左右比例：左:右 = 1:2
     LEFT_RIGHT_RATIO = (1, 2.5)
 
-    # 边框
     PANEL_RADIUS     = 14
     PANEL_BORDER_W   = 3
 
-    # 页面左上“Single Player”小标题
-    PAGE_TITLE_POS   = (28, 24)   # topleft
-    PAGE_TITLE_FONT  = "mid"      # 用较小字号
+    # 页面左上小标题
+    PAGE_TITLE_POS   = (28, 24)
+    PAGE_TITLE_FONT  = "mid"
 
-    # 左卡内部
-    LEFT_TITLE_GAP   = 18          # 左卡 Mode 标题离内框顶的距离
+    # —— 左卡（标题 + 图片极简旋钮）—— #
+    LEFT_TITLE_TEXT  = "Human"
+    LEFT_TITLE_GAP   = 0          # 标题离内框顶
+    TITLE_TO_IMG_GAP = 0          # 标题与图片区域之间的竖向间距
+
     IMG_REL_PATH     = "assets/animation/people01.png"
-    IMG_MAX_H_RATIO  = 0.58        # 左卡内框高的比例
-    IMG_SCALE        = 1.00
-    IMG_BASELINE_GAP = 120         # 人物底边距 Enter 顶部的距离（越大越靠上）
+    IMG_SCALE        = 0.5        # 你的目标缩放比例
+    IMG_GAP_TOP      = 0           # 额外：图片区域顶部再留白（你自己调）
+    IMG_GAP_BOTTOM   = 24          # 额外：图片底部到卡片底的留白（你自己调）
+    IMG_X_OFFSET     = 10           # 左右偏移（+右 / -左）
+    IMG_Y_OFFSET     = -20           # 上下偏移（+下 / -上）
 
-    # 右卡标题（放在外框外！）
+    # —— 右卡（说明）—— #
     HOWTO_TITLE_FONT = "big"
-    HOWTO_TITLE_GAP  = 38          # 标题到底下外框顶的距离
+    HOWTO_TITLE_GAP  = 38
+    COL_GUTTER       = 40
+    COL_TOP_PAD      = 18
+    COL_SIDE_PAD     = 20
+    HEADING_FONT     = "mid"
+    BODY_FONT        = "sml"
+    LINE_SPACING     = 1.20
+    BULLET_GAP       = 6
 
-    # 右卡两列
-    COL_GUTTER       = 40          # 列间距
-    COL_TOP_PAD      = 18          # 内容区顶部内边距（inside panel）
-    COL_SIDE_PAD     = 20          # 内容左右内边距
-    HEADING_FONT     = "mid"       # “# Game Rules #” 这行
-    BODY_FONT        = "sml"       # 子弹行
-    LINE_SPACING     = 1.20        # 行距
-    BULLET_GAP       = 6           # 同一段落相邻子弹的额外间距
-
-    # 按钮
+    # —— 底部按钮 —— #
     ENTER_SIZE       = (300, 58)
     BACK_POS         = (24, -64)
 
@@ -57,9 +57,9 @@ def draw_panel(surf, rect):
 def wrap_text(text, font, max_width):
     words, lines, cur = text.split(' '), [], ""
     for w in words:
-        test = (cur + " " + w).strip()
-        if font.size(test)[0] <= max_width:
-            cur = test
+        t = (cur + " " + w).strip()
+        if font.size(t)[0] <= max_width:
+            cur = t
         else:
             if cur: lines.append(cur)
             cur = w
@@ -72,26 +72,25 @@ class SingleInfoScreen:
         self.m = manager
         self.W, self.H = manager.size
 
-        # —— 外框：左:右=1:2 —— #
+        # —— 外框：左:右 —— #
         usable_w = self.W - L.PANEL_MARGINS * 2
-        left_r, right_r = L.LEFT_RIGHT_RATIO
-        w_unit = (usable_w - L.PANEL_GAP_X) / (left_r + right_r)
-        left_w  = int(w_unit * left_r)
-        right_w = int(w_unit * right_r)
+        lr = sum(L.LEFT_RIGHT_RATIO)
+        unit = (usable_w - L.PANEL_GAP_X) / lr
+        left_w  = int(unit * L.LEFT_RIGHT_RATIO[0])
+        right_w = int(unit * L.LEFT_RIGHT_RATIO[1])
         col_h   = self.H - L.PANEL_TOP - L.PANEL_BOTTOM_PAD
 
         self.left_outer  = pg.Rect(L.PANEL_MARGINS, L.PANEL_TOP, left_w, col_h)
         self.right_outer = pg.Rect(L.PANEL_MARGINS + left_w + L.PANEL_GAP_X, L.PANEL_TOP, right_w, col_h)
 
-        # 内框（内容用）
-        self.left_inner  = self.left_outer.inflate(-L.INNER_PAD * 2, -L.INNER_PAD * 2)
-        self.right_inner = self.right_outer.inflate(-L.INNER_PAD * 2, -L.INNER_PAD * 2)
+        self.left_inner  = self.left_outer.inflate(-L.INNER_PAD*2, -L.INNER_PAD*2)
+        self.right_inner = self.right_outer.inflate(-L.INNER_PAD*2, -L.INNER_PAD*2)
 
         # 页面左上小标题
         self.page_title = self.m.fonts[L.PAGE_TITLE_FONT].render("Single Player", True, CFG.COL_TEXT)
 
         # 左卡标题
-        self.left_head  = self.m.fonts["big"].render("Mode", True, CFG.COL_TEXT)
+        self.left_head  = self.m.fonts["big"].render(L.LEFT_TITLE_TEXT, True, CFG.COL_TEXT)
 
         # 右卡外部标题
         self.howto_head = self.m.fonts[L.HOWTO_TITLE_FONT].render("How to Play", True, CFG.COL_TEXT)
@@ -124,31 +123,45 @@ class SingleInfoScreen:
 
         # 按钮
         ew, eh = L.ENTER_SIZE
-        self.btn_enter = Button(pg.Rect(self.W // 2 - ew // 2, self.H - 84, ew, eh),
-                                "Enter", self.m.fonts["big"])
+        self.btn_enter = Button(pg.Rect(self.W//2 - ew//2, self.H - 130, ew, eh), "Enter", self.m.fonts["big"])
         bx, by = L.BACK_POS
-        self.btn_back = Button(pg.Rect(24, self.H + by, 140, 40),
-                               "Back", self.m.fonts["mid"])
+        self.btn_back  = Button(pg.Rect(bx, self.H + by, 140, 40), "Back", self.m.fonts["mid"])
 
-        # 左图几何
-        self.img_target_h = int(self.left_inner.height * L.IMG_MAX_H_RATIO)
-        self.img_baseline = self.btn_enter.rect.top - L.IMG_BASELINE_GAP
+        # —— 预计算左卡图片的“可用高度”与放置基线（底部）—— #
+        title_h   = self.left_head.get_height()
+        top_limit = self.left_inner.top + L.LEFT_TITLE_GAP + title_h + L.TITLE_TO_IMG_GAP + L.IMG_GAP_TOP
+        bot_limit = self.left_inner.bottom - L.IMG_GAP_BOTTOM
+        self.img_area_h = max(1, bot_limit - top_limit)
+        self.img_bottom = bot_limit                                # 底对齐基线
+        self.img_centerx = self.left_inner.centerx                 # 水平居中为基准
 
+    # 背景棋盘
     def _draw_grid(self, s):
         COLS, ROWS = 16, 9
         cw, ch = self.W // COLS, self.H // ROWS
         for r in range(ROWS):
             for c in range(COLS):
                 col = CFG.GRID_LIGHT if (r + c) % 2 == 0 else CFG.GRID_DARK
-                pg.draw.rect(s, col, (c * cw, r * ch, cw, ch))
+                pg.draw.rect(s, col, (c*cw, r*ch, cw, ch))
 
-    def _draw_img_bottom(self, surf, img, cx, baseline_y, target_h, scale=1.0):
-        if not img: return
-        w, h = img.get_size()
-        th = int(target_h * scale)
-        sc = th / h
-        simg = pg.transform.smoothscale(img, (int(w * sc), th))
-        surf.blit(simg, simg.get_rect(centerx=cx, bottom=baseline_y))
+    # —— 极简：按你的 IMG_SCALE 缩放；若会超出可用高度，则自动压到刚好不超 —— #
+    def _blit_image_simple(self, surf, img):
+        if not img:
+            return
+        iw, ih = img.get_size()
+        # 先用你给的比例
+        scale = L.IMG_SCALE
+        # 如果超高，做一次保底收缩，避免裁切（简单且安全）
+        max_scale = self.img_area_h / ih
+        if scale > max_scale:
+            scale = max_scale
+
+        nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
+        simg = pg.transform.smoothscale(img, (nw, nh))
+
+        dst = simg.get_rect(centerx=self.img_centerx + L.IMG_X_OFFSET,
+                            bottom=self.img_bottom + L.IMG_Y_OFFSET)
+        surf.blit(simg, dst)
 
     def handle_event(self, e):
         if self.btn_enter.handle_event(e) or (e.type == pg.KEYDOWN and e.key == pg.K_RETURN):
@@ -172,47 +185,42 @@ class SingleInfoScreen:
         draw_panel(s, self.right_outer)
 
         # 右侧 “How to Play” 在外框上方
-        howto_pos = self.howto_head.get_rect(center=(self.right_outer.centerx,
-                                                     self.right_outer.top - L.HOWTO_TITLE_GAP))
+        howto_pos = self.howto_head.get_rect(
+            center=(self.right_outer.centerx, self.right_outer.top - L.HOWTO_TITLE_GAP)
+        )
         s.blit(self.howto_head, howto_pos)
 
-        # 左卡标题：放左上角
+        # 左卡标题：上方居中
         s.blit(self.left_head, self.left_head.get_rect(
-            topleft=(self.left_inner.left + L.INNER_PAD, self.left_inner.top + L.LEFT_TITLE_GAP))
-        )
-        # 左卡人物
-        self._draw_img_bottom(
-            s, self._img,
-            self.left_inner.centerx,
-            self.img_baseline,
-            self.img_target_h,
-            L.IMG_SCALE
+            midtop=(self.left_inner.centerx, self.left_inner.top + L.LEFT_TITLE_GAP))
         )
 
-        # 右卡两列内容排版
+        # 左卡图片：极简缩放 + 底对齐 + 偏移
+        self._blit_image_simple(s, self._img)
+
+        # 右卡两列内容
         font_head = self.m.fonts[L.HEADING_FONT]
         font_body = self.m.fonts[L.BODY_FONT]
-        line_h = int(font_body.get_linesize() * L.LINE_SPACING)
+        line_h    = int(font_body.get_linesize() * L.LINE_SPACING)
 
-        # 列区域
-        content = self.right_inner.inflate(-L.COL_SIDE_PAD * 2, -L.COL_TOP_PAD * 2)
-        col_w = (content.width - L.COL_GUTTER) // 2
-        col_left  = pg.Rect(content.left,  content.top, col_w, content.height)
+        content   = self.right_inner.inflate(-L.COL_SIDE_PAD*2, -L.COL_TOP_PAD*2)
+        col_w     = (content.width - L.COL_GUTTER)//2
+        col_left  = pg.Rect(content.left, content.top, col_w, content.height)
         col_right = pg.Rect(content.left + col_w + L.COL_GUTTER, content.top, col_w, content.height)
 
-        # 画一列
         def draw_column(rect, heading_text, items):
             y = rect.top
-            # heading
-            head_img = font_head.render(heading_text, True, CFG.COL_TEXT)
-            s.blit(head_img, head_img.get_rect(topleft=(rect.left, y)))
+            # 简单“伪加粗”叠绘
+            head_img  = font_head.render(heading_text, True, CFG.COL_TEXT)
+            rect_head = head_img.get_rect(topleft=(rect.left, y))
+            for dx, dy in [(0,0),(1,0),(0,1),(1,1)]:
+                s.blit(head_img, rect_head.move(dx, dy))
             y += head_img.get_height() + 12
-            # bullets
+
             wrap_w = rect.width
             for t in items:
                 lines = wrap_text(t, font_body, wrap_w)
                 if lines:
-                    # dot + first line
                     dot = font_body.render("• ", True, CFG.COL_TEXT)
                     s.blit(dot, (rect.left, y))
                     x0 = rect.left + dot.get_width()

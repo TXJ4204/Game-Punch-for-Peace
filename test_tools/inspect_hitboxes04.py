@@ -1,4 +1,4 @@
-# tools/inspect_hitboxes02.py — v0.4
+# test_tools/inspect_hitboxes02.py — v0.4
 # 手动校准拳点：点击/拖动红(右拳)蓝(左拳)，选中有高亮；S保存JSON
 import json
 from pathlib import Path

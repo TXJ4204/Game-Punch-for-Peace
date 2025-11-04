@@ -1,4 +1,4 @@
-# tools/inspect_hitboxes.py
+# test_tools/inspect_hitboxes.py
 import json, sys
 from pathlib import Path
 import pygame as pg

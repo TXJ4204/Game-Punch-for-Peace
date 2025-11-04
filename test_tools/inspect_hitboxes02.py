@@ -1,4 +1,4 @@
-# tools/inspect_hitboxes02.py
+# test_tools/inspect_hitboxes02.py
 import json
 import sys
 from pathlib import Path
