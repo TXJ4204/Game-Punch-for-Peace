@@ -140,6 +140,14 @@ class SimpleSprite:
             self._acc -= frame_ms
             self._idx = (self._idx + 1) % len(frames)
 
+    def current_frame(self) -> pg.Surface | None:
+        """Return the current image surface of this state."""
+        frames = self._frames.get(self.state)
+        if not frames:
+            return None
+        return frames[self._idx]
+
+
     # --- current frame info ---
     def _cur(self) -> FrameType:
         frames = self._frames.get(self.state)

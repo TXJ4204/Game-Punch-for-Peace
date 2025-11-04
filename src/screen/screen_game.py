@@ -24,6 +24,11 @@ R_FACE_RIGHT =  1
 MOVE_COOLDOWN_MS = CFG.MOVE_COOLDOWN_MS
 HITSTOP_MS       = CFG.HITSTOP_MS
 
+# ------碰撞检测 fix---------
+CONTACT_MAX_GAP_X = getattr(CFG, "CONTACT_MAX_GAP_X", 6)        # 允许“负间隙/贴边”微重叠（像素）
+CONTACT_MIN_Y_OVERLAP = getattr(CFG, "CONTACT_MIN_Y_OVERLAP", 22) # 竖向至少重叠这么多像素才算同一层
+
+
 def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
@@ -120,6 +125,37 @@ class GameScreen:
         self.msg_color = color
         self.msg_until = pg.time.get_ticks() + ms
 
+    # ------ 碰撞检测 ---------
+    # --- helpers: current-frame tight bbox (yellow) in screen coords ---
+    def _frame_tight_bbox(self, sprite, center_xy, flip_h: bool) -> pg.Rect:
+        """
+        Use current frame's non-transparent bounding rect (tight bbox) as yellow box.
+        Works with current_frame() returning a Surface or (Surface, name).
+        """
+        frame = sprite.current_frame()
+        img = frame[0] if isinstance(frame, tuple) else frame
+        if img is None:
+            return pg.Rect(center_xy[0] - 1, center_xy[1] - 1, 2, 2)
+
+        if flip_h:
+            img = pg.transform.flip(img, True, False)
+
+        blit = img.get_rect(center=center_xy)
+        tight = img.get_bounding_rect(min_alpha=10)  # image-local
+        tight.move_ip(blit.topleft)  # to screen space
+        return tight
+
+    def _human_yellow_rect(self) -> pg.Rect:
+        return self._frame_tight_bbox(
+            self.sprite_h, grid_center(self.play_rect, *self.human.pos), flip_h=(self.h_face < 0)
+        )
+
+    def _roo_yellow_rect(self) -> pg.Rect:
+        return self._frame_tight_bbox(
+            self.sprite_r, grid_center(self.play_rect, *self.roo.pos), flip_h=(self.r_face < 0)
+        )
+
+
     # ---------- rects & fist ----------
     def _rect_at(self, grid_pos):
         cx = self.play_rect.left + (grid_pos[0] + 0.5) * self._cell_w
@@ -128,19 +164,16 @@ class GameScreen:
         r.center = (int(cx), int(cy))
         return r
 
-    def human_rect(self, center_xy: tuple[int, int] | None = None):
-        """Return human's yellow bbox (screen-space) of current frame."""
+    def human_rect(self, center_xy: tuple[int, int] | None = None) -> pg.Rect:
         if center_xy is None:
             center_xy = grid_center(self.play_rect, *self.human.pos)
-        flip = (self.h_face < 0)
-        return self.sprite_h.bbox_rect(center_xy, flip_h=flip)
+        return self._frame_tight_bbox(self.sprite_h, center_xy, flip_h=(self.h_face < 0))
 
-    def roo_rect(self, center_xy: tuple[int, int] | None = None):
-        """Return roo's yellow bbox (screen-space) of current frame."""
+    def roo_rect(self, center_xy: tuple[int, int] | None = None) -> pg.Rect:
         if center_xy is None:
             center_xy = grid_center(self.play_rect, *self.roo.pos)
-        flip = (self.r_face > 0)  # 我们袋鼠朝右要翻转
-        return self.sprite_r.bbox_rect(center_xy, flip_h=flip)
+        # 注意：我们绘制袋鼠朝右时是 flip=True
+        return self._frame_tight_bbox(self.sprite_r, center_xy, flip_h=(self.r_face > 0))
 
     def roo_fist_point(self):
         """
@@ -293,20 +326,12 @@ class GameScreen:
 
             # 命中条件：同一行相邻 + 面向正确 + 拳点落在人像素mask上
             # 命中条件：同一行相邻 + 面向正确 + 拳点落在人像素mask上
-            hit_ok = can_punch(self.roo.pos, self.human.pos, self.r_face)
+            h_rect = self.human_rect()
+            r_rect = self.roo_rect()
+            hit_ok = can_punch_yellow(h_rect, r_rect, self.r_face)
+            # 若仍保留“拳头点进命中盒”的二次验证，可继续叠加：
             if hit_ok:
-                # 用与 draw 完全一致的“贴边后中心”
-                h_center, r_center = self._centers_screen()
-                # 人物像素掩码（含翻转）
-                h_flip = (self.h_face < 0)
-                h_mask, h_rect = self.sprite_h.mask_and_rect(h_center, flip_h=h_flip)
-                # 拳点（基于当前帧、r_center、含翻转）
-                fx, fy = self.sprite_r.fist_point(r_center, flip_h=(self.r_face > 0))
-                # 拳点是否打在人像素（mask=1）
-                if 0 <= (fx - h_rect.x) < h_rect.w and 0 <= (fy - h_rect.y) < h_rect.h:
-                    hit_ok = bool(h_mask.get_at((fx - h_rect.x, fy - h_rect.y)))
-                else:
-                    hit_ok = False
+                hit_ok = h_rect.collidepoint(self.roo_fist_point())
 
             # 闪避保护
             if hit_ok and (now - getattr(self, "last_human_step_ms", -999999)) <= CFG.EVADE_GRACE_MS:
@@ -404,11 +429,18 @@ class GameScreen:
             return
 
         # 2) punch wind-up when adjacent on same row
-        if (AI_PUNCH_EN and dy == 0 and abs(dx) == 1
-                and now - self.last_punch_ms >= CFG.PUNCH_COOLDOWN_MS
-                and not getattr(self, "intend_punch", False)):
+        # 用黄框贴边相邻
+        h_rect = self.human_rect()
+        r_rect = self.roo_rect()
+        if can_punch_yellow(h_rect, r_rect, self.r_face) and (now - self.last_punch_ms >= CFG.PUNCH_COOLDOWN_MS):
             self.intend_punch = True
             self.punch_windup_until = now + CFG.PUNCH_WINDUP_MS
+
+            # if (AI_PUNCH_EN and dy == 0 and abs(dx) == 1
+        #         and now - self.last_punch_ms >= CFG.PUNCH_COOLDOWN_MS
+        #         and not getattr(self, "intend_punch", False)):
+        #     self.intend_punch = True
+        #     self.punch_windup_until = now + CFG.PUNCH_WINDUP_MS
             self._dbg("Wind-up start")
             return  # hit check will be handled in the 'commit' section already in update()
 
@@ -496,8 +528,8 @@ class GameScreen:
             return base_h_cxy, base_r_cxy
 
         # 计算当前帧下的 bbox（屏幕坐标）
-        h_bbox = self.sprite_h.bbox_rect(base_h_cxy, flip_h=(self.h_face < 0))
-        r_bbox = self.sprite_r.bbox_rect(base_r_cxy, flip_h=(self.r_face < 0))
+        h_bbox = self._frame_tight_bbox(self.sprite_h, base_h_cxy, flip_h=(self.h_face < 0))
+        r_bbox = self._frame_tight_bbox(self.sprite_r, base_r_cxy, flip_h=(self.r_face > 0))
 
         # 计算间隙：左人右roo 或 左roo右人
         # 约定 idx：左侧实体的 bbox.right 与 右侧实体的 bbox.left
@@ -580,6 +612,9 @@ class GameScreen:
             pg.draw.rect(s, (200, 170, 60),  self.roo_rect(r_center),   2)  # roo bbox
             fx, fy = self.sprite_r.fist_point(r_center, flip_h=(self.r_face > 0))
             pg.draw.circle(s, (230, 80, 80), (fx, fy), 5, 0)
+            if getattr(CFG, "DEBUG", False):
+                pg.draw.rect(self.m.screen, (244, 204, 47), self.roo_rect(), 2)  # yellow
+                pg.draw.rect(self.m.screen, (47, 213, 102), self.human_rect(), 2)  # greenish
 
         # 中央提示
         if now < getattr(self, "msg_until", 0) and getattr(self, "msg_text", ""):
@@ -600,13 +635,19 @@ class GameScreen:
             s.blit(img, img.get_rect(center=self.play_rect.center))
 
 # ==== helpers (punch condition) ====
-def can_punch(roo_pos, human_pos, r_face) -> bool:
-    rx, ry = roo_pos
-    hx, hy = human_pos
-    if ry != hy:
+def can_punch_yellow(h_rect: pg.Rect, r_rect: pg.Rect, r_face: int) -> bool:
+    """Adjacency by tight yellow boxes + tiny negative gap (visual stick)."""
+    # require vertical overlap
+    y_overlap = max(0, min(h_rect.bottom, r_rect.bottom) - max(h_rect.top, r_rect.top))
+    if y_overlap < CONTACT_MIN_Y_OVERLAP:
         return False
-    dx = hx - rx
-    if abs(dx) != 1:
-        return False
-    need = R_FACE_RIGHT if dx > 0 else R_FACE_LEFT
-    return r_face == need
+
+    # horizontal adjacency with small negative gap allowance
+    if r_face > 0:
+        # roo faces right -> human should be on roo's right; allow slight overlap
+        gap = h_rect.left - r_rect.right
+        return gap <= CONTACT_MAX_GAP_X
+    else:
+        # roo faces left -> human should be on roo's left
+        gap = r_rect.left - h_rect.right
+        return gap <= CONTACT_MAX_GAP_X

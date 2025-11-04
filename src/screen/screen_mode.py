@@ -87,7 +87,7 @@ class ModeScreen:
     ICON_TO_TIP_GAP        = 60         # distance from icon to bottom “Coming soon”
     LAYOUTA_TO_CONFIRM_GAP = 60         # distance between layout A (two cards) and confirm button
 
-    VERSION_TEXT           = "version 3.2"
+    VERSION_TEXT           = "version 3.3"
 
     def __init__(self, manager):
         self.m = manager

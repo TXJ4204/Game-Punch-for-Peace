@@ -6,7 +6,7 @@ from src.widgets import Button
 
 
 class L:
-    # —— 外层布局 —— #
+    # —— Outer layout —— #
     PANEL_TOP        = 120
     PANEL_MARGINS    = 80
     PANEL_GAP_X      = 50
@@ -17,23 +17,23 @@ class L:
     PANEL_RADIUS     = 14
     PANEL_BORDER_W   = 3
 
-    # 页面左上小标题
+    # Page top-left small title
     PAGE_TITLE_POS   = (28, 24)
     PAGE_TITLE_FONT  = "mid"
 
-    # —— 左卡（标题 + 图片极简旋钮）—— #
+    # —— Left card (title + ultra-minimal image knob) —— #
     LEFT_TITLE_TEXT  = "Human"
-    LEFT_TITLE_GAP   = 0          # 标题离内框顶
-    TITLE_TO_IMG_GAP = 0          # 标题与图片区域之间的竖向间距
+    LEFT_TITLE_GAP   = 0          # distance from title to inner frame top
+    TITLE_TO_IMG_GAP = 0          # vertical spacing between title and image area
 
     IMG_REL_PATH     = "assets/animation/people01.png"
-    IMG_SCALE        = 0.5        # 你的目标缩放比例
-    IMG_GAP_TOP      = 0           # 额外：图片区域顶部再留白（你自己调）
-    IMG_GAP_BOTTOM   = 24          # 额外：图片底部到卡片底的留白（你自己调）
-    IMG_X_OFFSET     = 10           # 左右偏移（+右 / -左）
-    IMG_Y_OFFSET     = -20           # 上下偏移（+下 / -上）
+    IMG_SCALE        = 0.5        # your target scaling ratio
+    IMG_GAP_TOP      = 0           # extra: additional top padding for image area (tweak yourself)
+    IMG_GAP_BOTTOM   = 24          # extra: bottom padding from image to card bottom (tweak yourself)
+    IMG_X_OFFSET     = 10           # horizontal offset (+right / -left)
+    IMG_Y_OFFSET     = -20           # vertical offset (+down / -up)
 
-    # —— 右卡（说明）—— #
+    # —— Right card (instructions) —— #
     HOWTO_TITLE_FONT = "big"
     HOWTO_TITLE_GAP  = 38
     COL_GUTTER       = 40
@@ -44,7 +44,7 @@ class L:
     LINE_SPACING     = 1.20
     BULLET_GAP       = 6
 
-    # —— 底部按钮 —— #
+    # —— Bottom buttons —— #
     ENTER_SIZE       = (300, 58)
     BACK_POS         = (24, -64)
 
@@ -72,7 +72,7 @@ class SingleInfoScreen:
         self.m = manager
         self.W, self.H = manager.size
 
-        # —— 外框：左:右 —— #
+        # —— Outer frames: left:right —— #
         usable_w = self.W - L.PANEL_MARGINS * 2
         lr = sum(L.LEFT_RIGHT_RATIO)
         unit = (usable_w - L.PANEL_GAP_X) / lr
@@ -86,16 +86,16 @@ class SingleInfoScreen:
         self.left_inner  = self.left_outer.inflate(-L.INNER_PAD*2, -L.INNER_PAD*2)
         self.right_inner = self.right_outer.inflate(-L.INNER_PAD*2, -L.INNER_PAD*2)
 
-        # 页面左上小标题
+        # Page top-left small title
         self.page_title = self.m.fonts[L.PAGE_TITLE_FONT].render("Single Player", True, CFG.COL_TEXT)
 
-        # 左卡标题
+        # Left card title
         self.left_head  = self.m.fonts["big"].render(L.LEFT_TITLE_TEXT, True, CFG.COL_TEXT)
 
-        # 右卡外部标题
+        # Right card external title
         self.howto_head = self.m.fonts[L.HOWTO_TITLE_FONT].render("How to Play", True, CFG.COL_TEXT)
 
-        # 两列文本
+        # Two-column text
         self.rules_heading = "# Game Rules #"
         self.rules_lines = [
             "Kangaroo jumps 2 steps fast but tires quickly.",
@@ -113,7 +113,7 @@ class SingleInfoScreen:
             "[Arrow] Move   [Space] Block",
         ]
 
-        # 图片
+        # Image
         try:
             here = Path(__file__).resolve().parent
             img_path = (here.parent.parent / L.IMG_REL_PATH).resolve()
@@ -121,21 +121,21 @@ class SingleInfoScreen:
         except Exception:
             self._img = None
 
-        # 按钮
+        # Buttons
         ew, eh = L.ENTER_SIZE
         self.btn_enter = Button(pg.Rect(self.W//2 - ew//2, self.H - 130, ew, eh), "Enter", self.m.fonts["big"])
         bx, by = L.BACK_POS
         self.btn_back  = Button(pg.Rect(bx, self.H + by, 140, 40), "Back", self.m.fonts["mid"])
 
-        # —— 预计算左卡图片的“可用高度”与放置基线（底部）—— #
+        # —— Precompute the “available height” and placement baseline (bottom) for the left card image —— #
         title_h   = self.left_head.get_height()
         top_limit = self.left_inner.top + L.LEFT_TITLE_GAP + title_h + L.TITLE_TO_IMG_GAP + L.IMG_GAP_TOP
         bot_limit = self.left_inner.bottom - L.IMG_GAP_BOTTOM
         self.img_area_h = max(1, bot_limit - top_limit)
-        self.img_bottom = bot_limit                                # 底对齐基线
-        self.img_centerx = self.left_inner.centerx                 # 水平居中为基准
+        self.img_bottom = bot_limit                                # bottom alignment baseline
+        self.img_centerx = self.left_inner.centerx                 # horizontal centering baseline
 
-    # 背景棋盘
+    # Background grid
     def _draw_grid(self, s):
         COLS, ROWS = 16, 9
         cw, ch = self.W // COLS, self.H // ROWS
@@ -144,14 +144,14 @@ class SingleInfoScreen:
                 col = CFG.GRID_LIGHT if (r + c) % 2 == 0 else CFG.GRID_DARK
                 pg.draw.rect(s, col, (c*cw, r*ch, cw, ch))
 
-    # —— 极简：按你的 IMG_SCALE 缩放；若会超出可用高度，则自动压到刚好不超 —— #
+    # —— Minimal: scale according to your IMG_SCALE; if it would exceed available height, clamp to just not exceed —— #
     def _blit_image_simple(self, surf, img):
         if not img:
             return
         iw, ih = img.get_size()
-        # 先用你给的比例
+        # first use your provided scale
         scale = L.IMG_SCALE
-        # 如果超高，做一次保底收缩，避免裁切（简单且安全）
+        # if too tall, apply a safeguard shrink to avoid cropping (simple and safe)
         max_scale = self.img_area_h / ih
         if scale > max_scale:
             scale = max_scale
@@ -177,28 +177,28 @@ class SingleInfoScreen:
         s.fill(CFG.BG)
         self._draw_grid(s)
 
-        # 页面左上小标题
+        # Page top-left small title
         s.blit(self.page_title, self.page_title.get_rect(topleft=L.PAGE_TITLE_POS))
 
-        # 外框
+        # Outer frames
         draw_panel(s, self.left_outer)
         draw_panel(s, self.right_outer)
 
-        # 右侧 “How to Play” 在外框上方
+        # “How to Play” above the right outer frame
         howto_pos = self.howto_head.get_rect(
             center=(self.right_outer.centerx, self.right_outer.top - L.HOWTO_TITLE_GAP)
         )
         s.blit(self.howto_head, howto_pos)
 
-        # 左卡标题：上方居中
+        # Left card title: centered at top
         s.blit(self.left_head, self.left_head.get_rect(
             midtop=(self.left_inner.centerx, self.left_inner.top + L.LEFT_TITLE_GAP))
         )
 
-        # 左卡图片：极简缩放 + 底对齐 + 偏移
+        # Left card image: minimal scaling + bottom alignment + offsets
         self._blit_image_simple(s, self._img)
 
-        # 右卡两列内容
+        # Right card two-column content
         font_head = self.m.fonts[L.HEADING_FONT]
         font_body = self.m.fonts[L.BODY_FONT]
         line_h    = int(font_body.get_linesize() * L.LINE_SPACING)
@@ -210,7 +210,7 @@ class SingleInfoScreen:
 
         def draw_column(rect, heading_text, items):
             y = rect.top
-            # 简单“伪加粗”叠绘
+            # Simple “fake bold” via overdraw
             head_img  = font_head.render(heading_text, True, CFG.COL_TEXT)
             rect_head = head_img.get_rect(topleft=(rect.left, y))
             for dx, dy in [(0,0),(1,0),(0,1),(1,1)]:
@@ -234,6 +234,6 @@ class SingleInfoScreen:
         draw_column(col_left,  self.rules_heading, self.rules_lines)
         draw_column(col_right, self.core_heading,  self.core_lines)
 
-        # 按钮
+        # Buttons
         self.btn_back.draw(s)
         self.btn_enter.draw(s)
