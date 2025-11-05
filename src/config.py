@@ -89,6 +89,15 @@ class _CFG:
     AVATAR_HUMAN: str = "ava_human.png"
     AVATAR_ROO:   str = "ava_roo.png"
 
+    # ------碰撞检测 fix---------
+    CONTACT_MAX_GAP_X = 10  # 允许的“几乎贴脸”负/正间隙，越大越贴
+    CONTACT_MIN_Y_OVERLAP = 24  # 认为“同一行”的最小竖向重叠像素，越大越严格
+    BASELINE_MARGIN = 4  # 行基线向上留的像素，避免踩线
+
+    # --- snap tuning for face-to-face stick ---
+    SNAP_EXTRA_X: int = 1  # extra pixels to "overlap" when snapping two yellow bboxes (visual stickiness)
+    SNAP_VERT_SLOP: int = 6  # vertical tolerance (pixels) to allow snap on same row
+
     # --- Debug & control toggles ---
     DEBUG: bool = True                    # print simple english logs to console
     AI_TURN_ONLY_MODE: bool = False        # <<< TEMP: only face the player, do not move/punch

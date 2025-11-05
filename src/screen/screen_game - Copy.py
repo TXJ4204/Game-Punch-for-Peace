@@ -9,46 +9,19 @@ from src.ui.hud import draw_top_hud, HUD_H
 from src.sprites import make_people_sprite, make_roo_sprite
 
 # ---- feature toggles from CFG ----
-DEBUG_LOG = getattr(CFG, "DEBUG", False)
-AI_FACE_ONLY       = getattr(CFG, "AI_TURN_ONLY_MODE", False)
-AI_FOLLOW_ENABLED  = (getattr(CFG, "AI_ALLOW_MOVE", True)  and not AI_FACE_ONLY)
-AI_PUNCH_ENABLED   = (getattr(CFG, "AI_ALLOW_PUNCH", True) and not AI_FACE_ONLY)
+DEBUG_LOG = CFG.DEBUG
+AI_FACE_ONLY       = CFG.AI_TURN_ONLY_MODE
+AI_FOLLOW_ENABLED  = (CFG.AI_ALLOW_MOVE  and not CFG.AI_TURN_ONLY_MODE)
+AI_PUNCH_ENABLED   = (CFG.AI_ALLOW_PUNCH and not CFG.AI_TURN_ONLY_MODE)
 
 # ---- facing enum ----
 R_FACE_LEFT  = -1
 R_FACE_RIGHT =  1
 
 # ---- timing aliases ----
-MOVE_COOLDOWN_MS = getattr(CFG, "MOVE_COOLDOWN_MS", 110)
-HITSTOP_MS       = getattr(CFG, "HITSTOP_MS", 120)
+MOVE_COOLDOWN_MS = CFG.MOVE_COOLDOWN_MS
+HITSTOP_MS       = CFG.HITSTOP_MS
 
-# ---- snap/spacing defaults (safe fallbacks) ----
-CONTACT_MIN_Y_OVERLAP = getattr(CFG, "CONTACT_MIN_Y_OVERLAP", 24)
-CONTACT_MAX_GAP_X     = getattr(CFG, "CONTACT_MAX_GAP_X", 0)       # allow tiny negative slit
-SNAP_VERT_SLOP        = getattr(CFG, "SNAP_VERT_SLOP", 6)          # treat “same row” slack
-SNAP_EXTRA_X          = getattr(CFG, "SNAP_EXTRA_X", 1)            # extra stickiness on X
-BASELINE_MARGIN       = getattr(CFG, "BASELINE_MARGIN", 5)         # floor margin inside a cell
-ROW_GAP_Y             = getattr(CFG, "ROW_GAP_Y", 6)               # min gap between two rows
-ROW_TOP_PADDING       = getattr(CFG, "ROW_TOP_PADDING", 8)         # padding above top row
-
-PUNCH_ANIM_MS         = getattr(CFG, "PUNCH_ANIM_MS", 320)
-PUNCH_COOLDOWN_MS     = getattr(CFG, "PUNCH_COOLDOWN_MS", 650)
-PUNCH_WINDUP_MS       = getattr(CFG, "PUNCH_WINDUP_MS", 200)
-PUNCH_DAMAGE          = getattr(CFG, "PUNCH_DAMAGE", 12)
-PUNCH_BLOCKED_DAMAGE  = getattr(CFG, "PUNCH_BLOCKED_DAMAGE", 3)
-
-BLOCK_DRAIN_PER_SEC   = getattr(CFG, "BLOCK_DRAIN_PER_SEC", 22)
-BLOCK_MIN_STAMINA     = getattr(CFG, "BLOCK_MIN_STAMINA", 8)
-BLOCK_RECOVER_MS      = getattr(CFG, "BLOCK_RECOVER_MS", 260)
-BLOCK_SHARED_LOSS     = getattr(CFG, "BLOCK_SHARED_LOSS", 6)
-
-ST_REGEN_PER_SEC_H    = getattr(CFG, "ST_REGEN_PER_SEC_H", 12)
-ST_REGEN_PER_SEC_R    = getattr(CFG, "ST_REGEN_PER_SEC_R", 12)
-WALK_COST             = getattr(CFG, "WALK_COST", 3)
-ROO_JUMP_ST_DRAIN     = getattr(CFG, "ROO_JUMP_ST_DRAIN", 5)
-ROO_REST_THRESHOLD    = getattr(CFG, "ROO_REST_THRESHOLD", 12)
-
-ROUND_SECONDS         = getattr(CFG, "ROUND_SECONDS", 45)
 
 def _clamp(v, lo, hi): return max(lo, min(hi, v))
 
@@ -56,10 +29,11 @@ def _clamp(v, lo, hi): return max(lo, min(hi, v))
 class GameScreen:
     """
     Grid-based duel (Human vs Roo).
-    Key rules:
-      - Human walks 1 cell; Roo jumps 2 cells (no pass-through, cannot land on human).
-      - All collisions, fist anchors and rendering use the SAME baseline-aligned centers.
-      - Visual adjacency uses tight yellow bboxes, not the old green/blue rectangles.
+    Design rules:
+      - Human walks 1 cell (4-neighborhood).
+      - Roo jumps 2 cells (no pass-through and cannot land on human).
+      - Punch only when on the same row and visually adjacent (using tight yellow bboxes).
+      - All collision & fist anchors use the *same* baseline-aligned centers as rendering.
     """
 
     def __init__(self, manager):
@@ -70,14 +44,15 @@ class GameScreen:
         self.human = Human(pos=(1, CFG.GRID_H // 2))
         self.roo   = Kangaroo(pos=(CFG.GRID_W - 2, CFG.GRID_H // 2))
 
-        # HP / stamina
-        self.hp_h = StaminaBar(getattr(CFG, "HUMAN_STAMINA", 100)); self.hp_h.reset()
-        self.st_h = StaminaBar(getattr(CFG, "HUMAN_STAMINA", 100))
-        self.st_r = StaminaBar(getattr(CFG, "ROO_STAMINA", 100))
+        # Bars
+        self.hp_h = StaminaBar(CFG.HUMAN_STAMINA)  # reuse as HP
+        self.st_h = StaminaBar(CFG.HUMAN_STAMINA)  # stamina (human)
+        self.hp_h.reset()
+        self.st_r = StaminaBar(CFG.ROO_STAMINA)    # stamina (roo)
 
-        # Lives (half hearts)
-        self.lives_halves = getattr(CFG, "HUMAN_HEARTS", 2) * 2
-        self.roo_halves   = getattr(CFG, "ROO_HEARTS", 3)   * 2
+        # Lives (half-hearts)
+        self.lives_halves = CFG.HUMAN_HEARTS * 2
+        self.roo_halves   = CFG.ROO_HEARTS   * 2
 
         # Round/Timer
         self.round_idx   = 1
@@ -87,8 +62,10 @@ class GameScreen:
         # Runtime states
         self.blocking = False
         self.last_block_down_ms = -10_000
+
         self.last_move_ms = 0
         self.last_human_step_ms = -10_000
+
         self.hitstop_until = 0
         self.ai_pause_until = 0
         self.last_ai_ms = 0
@@ -97,7 +74,7 @@ class GameScreen:
         self.punch_windup_until = 0
         self.roo_punch_until = 0
 
-        # Logs
+        # Score / msg
         self._dbg(f"Flags | face_only={AI_FACE_ONLY}  move={AI_FOLLOW_ENABLED}  punch={AI_PUNCH_ENABLED}")
         self.score_h = 0
         self.score_r = 0
@@ -116,7 +93,7 @@ class GameScreen:
         self.r_face = R_FACE_LEFT
         self.roo_prev = self.roo.pos
 
-        # Cached
+        # Cached dims
         self._cell_w = cell_w
         self._cell_h = cell_h
 
@@ -133,17 +110,49 @@ class GameScreen:
             hx, hy = self.human.pos
             print(f"[{t:7d}ms] H({hx},{hy}) R({rx},{ry}) | {msg}")
 
-    # ---------- center messages ----------
+    # ---------- messages ----------
     def _set_center_msg(self, text, color=(255,255,255), ms=900):
         self.msg_text = text
         self.msg_color = color
         self.msg_until = pg.time.get_ticks() + ms
 
-    # =====================  Tight yellow bbox helpers  =====================
+    # --- helpers: tight yellow bbox at a given screen center -----------------
+    def _human_yellow_rect_at(self, center_xy) -> pg.Rect:
+        """Tight yellow bbox of human at a specific screen center (uses current frame)."""
+        return self._frame_tight_bbox(self.sprite_h, center_xy, flip_h=(self.h_face < 0))
+
+    def _roo_yellow_rect_at(self, center_xy) -> pg.Rect:
+        """Tight yellow bbox of roo at a specific screen center (uses current frame)."""
+        return self._frame_tight_bbox(self.sprite_r, center_xy, flip_h=(self.r_face > 0))  # roo faces right => flipped
+
+    # keep the simple "current center" getters (backward compatibility)
+    def _human_yellow_rect(self) -> pg.Rect:
+        c = grid_center(self.play_rect, *self.human.pos)
+        return self._frame_tight_bbox(self.sprite_h, c, flip_h=(self.h_face < 0))
+
+    def _roo_yellow_rect(self) -> pg.Rect:
+        c = grid_center(self.play_rect, *self.roo.pos)
+        return self._frame_tight_bbox(self.sprite_r, c, flip_h=(self.r_face > 0))  # roo faces right => flipped
+
+    # public helpers used by draw/debug/ai; can receive an override center
+    def human_rect(self, center_xy: tuple[int, int] | None = None) -> pg.Rect:
+        """Tight yellow bbox of human (optionally at a given screen center)."""
+        if center_xy is None:
+            center_xy = grid_center(self.play_rect, *self.human.pos)
+        return self._frame_tight_bbox(self.sprite_h, center_xy, flip_h=(self.h_face < 0))
+
+    def roo_rect(self, center_xy: tuple[int, int] | None = None) -> pg.Rect:
+        """Tight yellow bbox of roo (optionally at a given screen center)."""
+        if center_xy is None:
+            center_xy = grid_center(self.play_rect, *self.roo.pos)
+        return self._frame_tight_bbox(self.sprite_r, center_xy, flip_h=(self.r_face > 0))  # roo faces right => flipped
+
+    # =====================  Tight yellow bbox path  =====================
 
     def _frame_tight_bbox(self, sprite, center_xy, *, flip_h: bool) -> pg.Rect:
         """
-        Tight bounding rect (non-transparent) of sprite's *current frame* in screen coords.
+        Return the tight bounding rect (non-transparent) of the sprite's *current frame*
+        in screen coordinates, using the given center and horizontal flip.
         """
         frame = sprite.current_frame()
         img = frame[0] if isinstance(frame, tuple) else frame
@@ -152,51 +161,28 @@ class GameScreen:
         if flip_h:
             img = pg.transform.flip(img, True, False)
         blit = img.get_rect(center=center_xy)
-        tight = img.get_bounding_rect(min_alpha=10)  # local
-        tight.move_ip(blit.topleft)                  # -> screen
+        tight = img.get_bounding_rect(min_alpha=10)  # image-local
+        tight.move_ip(blit.topleft)                  # to screen space
         return tight
 
     def _row_baseline_y(self, row: int) -> int:
-        """Visual 'floor' Y for a given grid row."""
+        """Visual 'floor' Y for a given grid row (keeps vertical collisions consistent)."""
         cell_h = self.play_rect.height // CFG.GRID_H
         top = self.play_rect.top + row * cell_h
-        return top + cell_h - BASELINE_MARGIN
-
-    def _row_ceiling_y(self, row: int) -> int:
-        """
-        Visual ceiling Y for a given grid row so that two adjacent rows never overlap.
-        For row 0 we use top padding; for others we keep a minimum ROW_GAP_Y from
-        the previous row's baseline.
-        """
-        if row <= 0:
-            return self.play_rect.top + ROW_TOP_PADDING
-        return self._row_baseline_y(row - 1) - ROW_GAP_Y
+        return top + cell_h - CFG.BASELINE_MARGIN  # e.g., 4~6 px
 
     def _center_on_row_baseline(self, sprite, grid_pos: tuple[int, int], face_lr: int, *, is_roo: bool) -> tuple[int,int]:
         """
-        Compute a screen center so the *tight* bbox:
-          - bottom sits exactly on the row's baseline, and
-          - top never crosses the row ceiling (prevents vertical overlap with the row above).
-        This is used universally for: rendering, hit tests, and fist anchors.
+        Compute a screen center so the *tight* bbox bottom sits exactly on the row's baseline.
+        This is used by: rendering, collisions, and fist anchors.
         """
         cx, cy = grid_center(self.play_rect, *grid_pos)
-        flip_h = (face_lr > 0) if is_roo else (face_lr < 0)
-
-        # First align bottom to baseline
+        flip_h = (face_lr > 0) if is_roo else (face_lr < 0)  # your sprite flip rule
         rect0 = self._frame_tight_bbox(sprite, (cx, cy), flip_h=flip_h)
         baseline = self._row_baseline_y(grid_pos[1])
         dy = baseline - rect0.bottom
-        cy1 = cy + dy
+        return (cx, cy + dy)
 
-        # Then enforce ceiling constraint (no overlap with upper row)
-        ceil_y = self._row_ceiling_y(grid_pos[1])
-        rect1 = self._frame_tight_bbox(sprite, (cx, cy1), flip_h=flip_h)
-        if rect1.top < ceil_y:
-            cy1 += (ceil_y - rect1.top)  # push down just enough
-
-        return (cx, cy1)
-
-    # Public getters that optionally accept an override center (in screen space)
     def human_rect(self, center_override: tuple[int,int] | None = None) -> pg.Rect:
         cxy = center_override or self._center_on_row_baseline(self.sprite_h, self.human.pos, self.h_face, is_roo=False)
         return self._frame_tight_bbox(self.sprite_h, cxy, flip_h=(self.h_face < 0))
@@ -210,38 +196,46 @@ class GameScreen:
         center = self._center_on_row_baseline(self.sprite_r, self.roo.pos, self.r_face, is_roo=True)
         return self.sprite_r.fist_point(center, flip_h=(self.r_face > 0))
 
-    def _human_yellow_rect_at(self, center_xy) -> pg.Rect:
-        return self._frame_tight_bbox(self.sprite_h, center_xy, flip_h=(self.h_face < 0))
-
-    def _roo_yellow_rect_at(self, center_xy) -> pg.Rect:
-        return self._frame_tight_bbox(self.sprite_r, center_xy, flip_h=(self.r_face > 0))
-
-    # Snap two characters along X so their yellow bboxes touch (no slit)
     def _centers_face_to_face_snap(self, base_h: tuple[int, int], base_r: tuple[int, int]):
-        hx, hy = base_h
+        """
+        Snap two characters visually edge-to-edge using their *yellow* tight bboxes.
+        - Uses vertical slop to still treat them as same row (CFG.SNAP_VERT_SLOP).
+        - Uses extra overlap pixels (CFG.SNAP_EXTRA_X) to remove any tiny gap.
+        Returns (human_center, roo_center) in *screen* coords.
+        """
+        hx, hy = base_h;
         rx, ry = base_r
         h_rect = self._human_yellow_rect_at(base_h)
         r_rect = self._roo_yellow_rect_at(base_r)
 
-        same_row = abs(h_rect.centery - r_rect.centery) <= SNAP_VERT_SLOP
+        vert_slop = getattr(CFG, "SNAP_VERT_SLOP", 6)
+        same_row = abs(h_rect.centery - r_rect.centery) <= vert_slop
         if not same_row:
             return base_h, base_r
 
+        extra = getattr(CFG, "SNAP_EXTRA_X", 1)
+
+        # human on the left
         if h_rect.centerx <= r_rect.centerx:
-            gap = r_rect.left - h_rect.right
+            gap = r_rect.left - h_rect.right  # >0 means a visible gap
             if gap > 0:
-                move_each = max(0, (gap - 1) // 2) + SNAP_EXTRA_X
-                return (h_rect.centerx + move_each, h_rect.centery), (r_rect.centerx - move_each, r_rect.centery)
+                move_each = max(0, (gap - 1) // 2) + extra
+                h_c = (h_rect.centerx + move_each, h_rect.centery)
+                r_c = (r_rect.centerx - move_each, r_rect.centery)
+                return h_c, r_c
             return base_h, base_r
 
+        # human on the right
         gap = h_rect.left - r_rect.right
         if gap > 0:
-            move_each = max(0, (gap - 1) // 2) + SNAP_EXTRA_X
-            return (h_rect.centerx - move_each, h_rect.centery), (r_rect.centerx + move_each, r_rect.centery)
+            move_each = max(0, (gap - 1) // 2) + extra
+            h_c = (h_rect.centerx - move_each, h_rect.centery)
+            r_c = (r_rect.centerx + move_each, r_rect.centery)
+            return h_c, r_c
         return base_h, base_r
 
     def _centers_screen(self) -> tuple[tuple[int,int], tuple[int,int]]:
-        """Return (human_center, roo_center) — baseline-aligned, ceiling-safe, then snapped along X."""
+        """Return (human_center, roo_center) — baseline-aligned then snapped along X."""
         base_h = self._center_on_row_baseline(self.sprite_h, self.human.pos, self.h_face, is_roo=False)
         base_r = self._center_on_row_baseline(self.sprite_r, self.roo.pos, self.r_face, is_roo=True)
         return self._centers_face_to_face_snap(base_h, base_r)
@@ -290,20 +284,20 @@ class GameScreen:
 
     # =====================  Input  =====================
     def handle_event(self, e):
-        """
-        Handle only the keys we care about; ignore the rest safely.
-        ESC -> push PauseScreen; SPACE -> hold block.
-        """
+        # Only handle keys we care; ignore all others safely.
         if e.type == pg.KEYDOWN:
             if e.key == pg.K_ESCAPE:
-                self.m.push("pause")   # PauseScreen must be registered in manager
+                # push a pause overlay; input will be captured by PauseScreen
+                self.m.push("pause")
                 return
             if e.key == pg.K_SPACE:
-                self._set_blocking(True); return
-            # ignore others
+                self._set_blocking(True)
+                return
+            # ignore all other keys
         elif e.type == pg.KEYUP:
             if e.key == pg.K_SPACE:
-                self._set_blocking(False); return
+                self._set_blocking(False)
+                return
             # ignore others
 
     def _set_blocking(self, on: bool):
@@ -311,7 +305,7 @@ class GameScreen:
         if on:
             self.last_block_down_ms = pg.time.get_ticks()
 
-    # =====================  Update  =====================
+    # =====================  Update (upper half)  =====================
     def update(self, dt_ms: int):
         now = pg.time.get_ticks()
 
@@ -322,26 +316,27 @@ class GameScreen:
         # Human stamina drain/regen
         dt_sec = dt_ms / 1000.0
         if self.blocking:
-            self.st_h.lose(BLOCK_DRAIN_PER_SEC * dt_sec)
-            if self.st_h.cur <= BLOCK_MIN_STAMINA:
+            self.st_h.lose(CFG.BLOCK_DRAIN_PER_SEC * dt_sec)
+            if self.st_h.cur <= CFG.BLOCK_MIN_STAMINA:
                 self._set_blocking(False)
         else:
-            self.st_h.cur = min(self.st_h.max, self.st_h.cur + ST_REGEN_PER_SEC_H * dt_sec)
+            self.st_h.cur = min(self.st_h.max, self.st_h.cur + CFG.ST_REGEN_PER_SEC_H * dt_sec)
 
-        # Human move (continuous keyboard + cooldown + stamina)
+        # Human move (continuous keyboard, cooldown + stamina)
         keys = pg.key.get_pressed()
         if now - self.last_move_ms >= MOVE_COOLDOWN_MS:
             hx, hy = self.human.pos
             nx, ny = hx, hy
+
             if keys[pg.K_UP]:    ny -= 1
             elif keys[pg.K_DOWN]: ny += 1
             elif keys[pg.K_LEFT]: nx -= 1; self.h_face = R_FACE_LEFT
             elif keys[pg.K_RIGHT]:nx += 1; self.h_face = R_FACE_RIGHT
 
             if (nx, ny) != (hx, hy) and self.human.can_move(nx, ny, roo_pos=self.roo.pos, cols=CFG.GRID_W, rows=CFG.GRID_H):
-                if self.st_h.cur >= WALK_COST:
+                if self.st_h.cur >= CFG.WALK_COST:
                     self.human.move_to(nx, ny)
-                    self.st_h.lose(WALK_COST)
+                    self.st_h.lose(CFG.WALK_COST)
                     self.last_move_ms = now
                     self.last_human_step_ms = now
                     self._face_after_player_moved()
@@ -357,19 +352,21 @@ class GameScreen:
             self._face_towards_player_x()
             self._dbg(f"Punch commit face: {self._face_str(prev)} -> {self._face_str(self.r_face)}")
 
+            # Anim time stamps
             self.sprite_r.set_state("punch")
-            self.roo_punch_until = now + PUNCH_ANIM_MS
+            self.roo_punch_until = now + CFG.PUNCH_ANIM_MS
             self.last_punch_ms = now
 
-            # Hit test by tight yellow bboxes (+ optional fist-in-bbox)
+            # Hit test: same-row adjacency by yellow bboxes (+ tiny negative gap allowed)
             h_rect = self.human_rect()
             r_rect = self.roo_rect()
             hit_ok = can_punch_yellow(h_rect, r_rect, self.r_face)
+            # Optional extra: fist point must also land inside human yellow bbox
             if hit_ok:
                 hit_ok = h_rect.collidepoint(self.roo_fist_point())
 
             # Evade grace after human just moved
-            if hit_ok and (now - getattr(self, "last_human_step_ms", -999999)) <= getattr(CFG, "EVADE_GRACE_MS", 140):
+            if hit_ok and (now - getattr(self, "last_human_step_ms", -999999)) <= CFG.EVADE_GRACE_MS:
                 hit_ok = False
                 self._dbg("Hit test: evaded by recent move")
 
@@ -378,29 +375,31 @@ class GameScreen:
                 self._dbg("Punch result: whiff -> short pause")
                 return
 
-            # BLOCK or HIT
+            # BLOCK or HIT (simplified)
             if self.blocking:
                 self._dbg("Punch result: BLOCK")
                 try: self.sfx.get("block") and self.sfx["block"].play()
                 except: pass
-                self.hp_h.lose(PUNCH_BLOCKED_DAMAGE)
-                self.st_r.lose(BLOCK_SHARED_LOSS)
-                self.st_h.lose(BLOCK_SHARED_LOSS * 0.5)
+                self.hp_h.lose(CFG.PUNCH_BLOCKED_DAMAGE)
+                self.st_r.lose(CFG.BLOCK_SHARED_LOSS)
+                self.st_h.lose(CFG.BLOCK_SHARED_LOSS * 0.5)
                 self._set_center_msg("BLOCK!", (230,230,230))
                 self.hitstop_until = now + HITSTOP_MS
                 self._roo_step_back()
-                self.ai_pause_until = now + BLOCK_RECOVER_MS
+                self.ai_pause_until = now + CFG.BLOCK_RECOVER_MS
                 self.score_r += 1
                 return
 
+            # Direct hit
             self._dbg("Punch result: HIT")
             try: self.sfx.get("hit") and self.sfx["hit"].play()
             except: pass
-            self.hp_h.lose(PUNCH_DAMAGE)
-            self._set_center_msg(f"-{PUNCH_DAMAGE} HP", (240,120,120))
+            self.hp_h.lose(CFG.PUNCH_DAMAGE)
+            self._set_center_msg(f"-{CFG.PUNCH_DAMAGE} HP", (240,120,120))
             self.hitstop_until = now + HITSTOP_MS
             self.score_r += 1
 
+            # Half-heart check
             if self.hp_h.cur <= 0:
                 self.lives_halves = max(0, self.lives_halves - 1)
                 self.hp_h.reset()
@@ -429,32 +428,34 @@ class GameScreen:
         if now < self.hitstop_until or now < getattr(self, "ai_pause_until", 0):
             return
 
-        if self.st_r.cur < ROO_REST_THRESHOLD:
-            self.st_r.cur = min(self.st_r.max, self.st_r.cur + ST_REGEN_PER_SEC_R * dt_sec)
+        # Roo stamina idle regen gate
+        if self.st_r.cur < CFG.ROO_REST_THRESHOLD:
+            self.st_r.cur = min(self.st_r.max, self.st_r.cur + CFG.ST_REGEN_PER_SEC_R * dt_sec)
             return
 
         rx, ry = self.roo.pos
         hx, hy = self.human.pos
         dx, dy = hx - rx, hy - ry
 
+        # Always face player by X first
         need_face = R_FACE_RIGHT if dx >= 0 else R_FACE_LEFT
         if self.r_face != need_face:
             self._set_face(need_face)
 
-        if AI_FACE_ONLY:
+        if CFG.AI_TURN_ONLY_MODE:
             return
 
         # Wind-up if visually adjacent on same row
         h_rect = self.human_rect()
         r_rect = self.roo_rect()
-        if AI_PUNCH_ENABLED and can_punch_yellow(h_rect, r_rect, self.r_face) and (now - self.last_punch_ms >= PUNCH_COOLDOWN_MS):
+        if CFG.AI_ALLOW_PUNCH and can_punch_yellow(h_rect, r_rect, self.r_face) and (now - self.last_punch_ms >= CFG.PUNCH_COOLDOWN_MS):
             self.intend_punch = True
-            self.punch_windup_until = now + PUNCH_WINDUP_MS
+            self.punch_windup_until = now + CFG.PUNCH_WINDUP_MS
             self._dbg("Wind-up start")
-            return
+            return  # commit in update()
 
         # Follow (prefer X, else Y)
-        if AI_FOLLOW_ENABLED and (now - self.last_ai_ms >= getattr(CFG, "AI_DECIDE_EVERY_MS", 120)):
+        if CFG.AI_ALLOW_MOVE and (now - self.last_ai_ms >= CFG.AI_DECIDE_EVERY_MS):
             self.last_ai_ms = now
             moved = False
             if dx != 0:
@@ -462,7 +463,7 @@ class GameScreen:
             elif dy != 0:
                 moved = self._safe_move_roo(rx, ry + (2 if dy > 0 else -2))
             if moved:
-                self.st_r.lose(ROO_JUMP_ST_DRAIN)
+                self.st_r.lose(CFG.ROO_JUMP_ST_DRAIN)
                 self.sprite_r.set_state("jump")
 
     def _end_round(self, winner: str):
@@ -475,7 +476,7 @@ class GameScreen:
         now = pg.time.get_ticks()
 
         # Timer (incl. overtime)
-        secs_left = max(0, ROUND_SECONDS - (now - self.round_start) // 1000)
+        secs_left = max(0, CFG.ROUND_SECONDS - (now - self.round_start) // 1000)
         if secs_left == 0 and self.overtime_started is not None:
             secs_left = max(0, 15 - (now - self.overtime_started) // 1000)
 
@@ -518,7 +519,7 @@ class GameScreen:
             spr.draw(s, cxy, flip_h=flip)
 
         # Debug overlays (always use same centers as rendering)
-        if getattr(CFG, "DEBUG", False):
+        if CFG.DEBUG:
             h_bbox = self.human_rect(h_center)
             r_bbox = self.roo_rect(r_center)
             pg.draw.rect(s, (47, 213, 102), h_bbox, 2)   # human (greenish)
@@ -545,14 +546,14 @@ class GameScreen:
 def can_punch_yellow(h_rect: pg.Rect, r_rect: pg.Rect, r_face: int) -> bool:
     """
     Visual adjacency using *tight* yellow bboxes:
-      - Require minimum vertical overlap (CONTACT_MIN_Y_OVERLAP).
+      - Require minimum vertical overlap (CONFIG: CONTACT_MIN_Y_OVERLAP).
       - Allow a tiny negative horizontal gap to remove the visible slit (CONTACT_MAX_GAP_X ≤ 0).
     """
     y_overlap = max(0, min(h_rect.bottom, r_rect.bottom) - max(h_rect.top, r_rect.top))
-    if y_overlap < CONTACT_MIN_Y_OVERLAP:
+    if y_overlap < CFG.CONTACT_MIN_Y_OVERLAP:
         return False
     if r_face > 0:   # roo faces right → human must be on roo's right
         gap = h_rect.left - r_rect.right
     else:            # roo faces left → human must be on roo's left
         gap = r_rect.left - h_rect.right
-    return gap <= CONTACT_MAX_GAP_X
+    return gap <= CFG.CONTACT_MAX_GAP_X

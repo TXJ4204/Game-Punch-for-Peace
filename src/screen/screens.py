@@ -7,7 +7,7 @@ from .screen_mode import ModeScreen
 from .screen_single_info import SingleInfoScreen
 from .screen_game import GameScreen
 from .screen_end import EndScreen
-from .screen_pause import PauseScreen  # ← new
+from .screen_pause import PauseScreen
 
 class ScreenManager:
     """

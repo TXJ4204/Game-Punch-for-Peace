@@ -4,8 +4,9 @@ from src.config import CFG
 
 class PauseScreen:
     """
-    Pause overlay displayed on top of the game.
-    ESC: Continue (pop)
+    Pause overlay displayed on top of the game. Handled by ScreenManager as the "top-of-stack" screen.
+    Esc: Continue (you could also only trigger push in GameScreen and not handle Esc here)
+    C: Continue (pop)
     Enter: Retry (replace('game'))
     H: Home (goto('home'))
     Mouse clicks on any of the three button areas also work.
@@ -14,31 +15,21 @@ class PauseScreen:
         self.m = manager
         self.W, self.H = manager.size
 
-        # Three button rectangles
+        # Three clickable rectangles
         y = self.H // 2 + 28
         self.rect_continue = pg.Rect(self.W//2 - 260, y, 160, 54)
         self.rect_retry    = pg.Rect(self.W//2 -  80, y, 160, 54)
         self.rect_home     = pg.Rect(self.W//2 + 100, y, 160, 54)
 
-        # font
-        self.font_btn  = self.m.fonts["mid"]
-        self.font_hint = self.m.fonts["sml"]
-
-        # Button Text
-        self.labels = [
-            ("Continue", self.rect_continue),
-            ("Retry",    self.rect_retry),
-            ("Home",     self.rect_home)
-        ]
-
+    # Input is only handled on the pause screen; do not pass down to the underlying game
     def handle_event(self, e):
         if e.type == pg.KEYDOWN:
-            if e.key == pg.K_ESCAPE:
-                self.m.pop()            # Continue the Game
+            if e.key == pg.K_c:
+                self.m.pop()            # Continue
             elif e.key == pg.K_RETURN:
-                self.m.replace("game")  # retry
+                self.m.replace("game")  # Restart
             elif e.key == pg.K_h:
-                self.m.goto("home")     # back home page
+                self.m.goto("home")     # Go to Home
 
         elif e.type == pg.MOUSEBUTTONDOWN and e.button == 1:
             mx, my = e.pos
@@ -49,30 +40,22 @@ class PauseScreen:
             elif self.rect_home.collidepoint(mx, my):
                 self.m.goto("home")
 
-    def update(self, dt):
-        pass
+    def update(self, dt): pass
 
     def draw(self):
         s = self.m.screen
-        # Semi-transparent Background
+        # Translucent overlay drawn on top of the "underlying game screen"
         overlay = pg.Surface((self.W, self.H), pg.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
+        overlay.fill((0, 0, 0, 160))
         s.blit(overlay, (0, 0))
 
-        # title
         title = self.m.fonts["title"].render("Paused", True, CFG.TEXT)
-        s.blit(title, title.get_rect(center=(self.W//2, self.H//2 - 80)))
+        s.blit(title, title.get_rect(center=(self.W//2, self.H//2 - 60)))
 
-        # draw button
-        for text, rect in self.labels:
+        # Copy/text
+        opts = self.m.fonts["mid"].render("[C] Continue   [Enter] Retry   [H] Home", True, CFG.TEXT)
+        s.blit(opts, opts.get_rect(center=(self.W//2, self.H//2 + -2)))
+
+        # Visible button frames to facilitate mouse clicks
+        for rect in (self.rect_continue, self.rect_retry, self.rect_home):
             pg.draw.rect(s, (200, 200, 210), rect, width=2, border_radius=10)
-            # --- 在按钮内部居中显示文字 ---
-            img = self.font_btn.render(text, True, (240, 240, 240))
-            img_rect = img.get_rect(center=rect.center)
-            s.blit(img, img_rect)
-
-        # hint
-        hint = self.font_hint.render(
-            "[Esc] Continue   [Enter] Retry the game   [H] back Home", True, CFG.TEXT
-        )
-        s.blit(hint, hint.get_rect(center=(self.W//2, self.H//2 + 200)))
