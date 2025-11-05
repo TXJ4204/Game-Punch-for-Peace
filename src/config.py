@@ -63,8 +63,8 @@ class _CFG:
     # Stamina & costs
     BLOCK_DRAIN_PER_SEC: float = 2.5
     ROO_JUMP_ST_DRAIN: float = 6.0
-    WALK_COST: int = 2
-    JUMP_COST: int = 4
+    WALK_COST: int = 8
+    JUMP_COST: int = 16
 
     # Regen/thresholds
     ROO_REST_THRESHOLD: float = 10.0
@@ -88,6 +88,10 @@ class _CFG:
     # Avatars
     AVATAR_HUMAN: str = "ava_human.png"
     AVATAR_ROO:   str = "ava_roo.png"
+
+    # message
+    FLOAT_MSG_DURATION_MS = 1200
+    FLOAT_MSG_RISE_SPEED = 25
 
     # ------碰撞检测 fix---------
     CONTACT_MAX_GAP_X = 10  # 允许的“几乎贴脸”负/正间隙，越大越贴

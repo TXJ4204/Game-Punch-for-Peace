@@ -125,6 +125,9 @@ class GameScreen:
         try: pg.mixer.init()
         except: pass
 
+        # floating damage messages
+        self.float_msgs: list[dict] = []  # each: {"text": str, "color": (r,g,b), "pos": (x,y), "born": ms}
+
     # ---------- debug print ----------
     def _dbg(self, msg: str):
         if DEBUG_LOG:
@@ -133,11 +136,22 @@ class GameScreen:
             hx, hy = self.human.pos
             print(f"[{t:7d}ms] H({hx},{hy}) R({rx},{ry}) | {msg}")
 
-    # ---------- center messages ----------
+    # ---------- messages ----------
     def _set_center_msg(self, text, color=(255,255,255), ms=900):
         self.msg_text = text
         self.msg_color = color
         self.msg_until = pg.time.get_ticks() + ms
+
+    def _spawn_float_msg(self, text: str, color=(255, 80, 80), pos=None):
+        """Spawn a floating text message that rises and fades out."""
+        if pos is None:
+            pos = self.play_rect.center
+        self.float_msgs.append({
+            "text": text,
+            "color": color,
+            "pos": pos,
+            "born": pg.time.get_ticks(),
+        })
 
     # =====================  Tight yellow bbox helpers  =====================
 
@@ -218,27 +232,44 @@ class GameScreen:
 
     # Snap two characters along X so their yellow bboxes touch (no slit)
     def _centers_face_to_face_snap(self, base_h: tuple[int, int], base_r: tuple[int, int]):
-        hx, hy = base_h
-        rx, ry = base_r
+        """
+        Align yellow bboxes along X and Y to ensure:
+          - If on same row → touch horizontally (like before)
+          - If one above the other → touch vertically (no overlap)
+        """
         h_rect = self._human_yellow_rect_at(base_h)
         r_rect = self._roo_yellow_rect_at(base_r)
 
-        same_row = abs(h_rect.centery - r_rect.centery) <= SNAP_VERT_SLOP
-        if not same_row:
-            return base_h, base_r
+        new_h = list(base_h)
+        new_r = list(base_r)
 
-        if h_rect.centerx <= r_rect.centerx:
-            gap = r_rect.left - h_rect.right
-            if gap > 0:
-                move_each = max(0, (gap - 1) // 2) + SNAP_EXTRA_X
-                return (h_rect.centerx + move_each, h_rect.centery), (r_rect.centerx - move_each, r_rect.centery)
-            return base_h, base_r
+        # --- horizontal snap ---
+        horiz_gap = r_rect.left - h_rect.right if h_rect.centerx < r_rect.centerx else h_rect.left - r_rect.right
+        if abs(h_rect.centery - r_rect.centery) <= getattr(CFG, "SNAP_VERT_SLOP", 6):
+            # same row -> snap X (existing logic)
+            if horiz_gap > 0:
+                move = max(0, (horiz_gap - 1) // 2) + getattr(CFG, "SNAP_EXTRA_X", 1)
+                if h_rect.centerx < r_rect.centerx:
+                    new_h[0] += move
+                    new_r[0] -= move
+                else:
+                    new_h[0] -= move
+                    new_r[0] += move
 
-        gap = h_rect.left - r_rect.right
-        if gap > 0:
-            move_each = max(0, (gap - 1) // 2) + SNAP_EXTRA_X
-            return (h_rect.centerx - move_each, h_rect.centery), (r_rect.centerx + move_each, r_rect.centery)
-        return base_h, base_r
+        # --- vertical snap ---
+        else:
+            # human below roo → push human down
+            if h_rect.top < r_rect.bottom and h_rect.centery > r_rect.centery:
+                overlap = r_rect.bottom - h_rect.top
+                if overlap > 0:
+                    new_h[1] += overlap + 1
+            # human above roo → push human up
+            elif r_rect.top < h_rect.bottom and r_rect.centery > h_rect.centery:
+                overlap = h_rect.bottom - r_rect.top
+                if overlap > 0:
+                    new_h[1] -= overlap + 1
+
+        return tuple(new_h), tuple(new_r)
 
     def _centers_screen(self) -> tuple[tuple[int,int], tuple[int,int]]:
         """Return (human_center, roo_center) — baseline-aligned, ceiling-safe, then snapped along X."""
@@ -386,7 +417,10 @@ class GameScreen:
                 self.hp_h.lose(PUNCH_BLOCKED_DAMAGE)
                 self.st_r.lose(BLOCK_SHARED_LOSS)
                 self.st_h.lose(BLOCK_SHARED_LOSS * 0.5)
-                self._set_center_msg("BLOCK!", (230,230,230))
+                # self._set_center_msg("BLOCK!", (230,230,230))
+                block_pos = self.human_rect().midtop
+                self._spawn_float_msg("BLOCK!", (230, 230, 230), (block_pos[0], block_pos[1] - 30))
+
                 self.hitstop_until = now + HITSTOP_MS
                 self._roo_step_back()
                 self.ai_pause_until = now + BLOCK_RECOVER_MS
@@ -397,7 +431,10 @@ class GameScreen:
             try: self.sfx.get("hit") and self.sfx["hit"].play()
             except: pass
             self.hp_h.lose(PUNCH_DAMAGE)
-            self._set_center_msg(f"-{PUNCH_DAMAGE} HP", (240,120,120))
+            # self._set_center_msg(f"-{PUNCH_DAMAGE} HP", (240,120,120))
+            hit_pos = self.human_rect().midtop
+            self._spawn_float_msg(f"-{PUNCH_DAMAGE} HP", (240, 80, 80), (hit_pos[0], hit_pos[1] - 20))
+
             self.hitstop_until = now + HITSTOP_MS
             self.score_r += 1
 
@@ -530,6 +567,23 @@ class GameScreen:
         if now < self.msg_until and self.msg_text:
             img = self.m.fonts["title"].render(self.msg_text, True, self.msg_color)
             s.blit(img, img.get_rect(center=self.play_rect.center))
+
+        # Floating damage / block messages
+        now_ms = pg.time.get_ticks()
+        alive_msgs = []
+        for msg in self.float_msgs:
+            age = now_ms - msg["born"]
+            if age > 1200:  # 1.2s lifespan
+                continue
+            fade = max(0, 255 - int(age / 1200 * 255))
+            y_off = -int(age / 25)  # upward motion
+            font = self.m.fonts["small"]
+            img = font.render(msg["text"], True, msg["color"])
+            img.set_alpha(fade)
+            pos = (msg["pos"][0] - img.get_width() // 2, msg["pos"][1] + y_off)
+            s.blit(img, pos)
+            alive_msgs.append(msg)
+        self.float_msgs = alive_msgs
 
         # Round popup
         if self.popup_until > now and self.popup_kind:
