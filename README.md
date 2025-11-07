@@ -1,6 +1,41 @@
+
+
 ## Game: Punch for Peace 🥊
 
 ![post_pic.png](assets/images/post_pic.png)
+
+## **🛠️ Development Update**
+
+> **Last Updated:** Nov 7, 2025
+> 
+> **Current Version:** `v3.22-alpha`
+> 
+>  **Development Time (so far):** ~24 hours
+
+
+
+## ⚠️ Notice
+
+Hi everyone — thank you for checking out my Mini Game: **Punch for Peace**!
+The current build on GitHub is an early alpha prototype. 
+
+After the latest update, the game may **crash** right after entering the main screen. This issue is related to **event handling conflicts, and is currently being fixed.**
+
+
+
+---
+
+### 💬 Developer’s Note
+
+This project was built **within 24 hours** as part of a solo creative challenge.
+
+The next goal is to deliver a **stable, fully playable single-player version** at the 48-hour mark.
+
+ Thank you to everyone who’s starred, followed, or pre-registered — your patience means a lot ❤️
+
+
+
+---
 
 ## **Story Background:**
 
@@ -39,7 +74,11 @@ Players move, dodge, and block in the game of jumping and walking, experience th
 
 ---
 
-## How to Run
+## How to Play
+
+*The official downloadable version will be available on the Release page once all major bugs are fixed.*
+
+> You can **play the current experimental version** by running the source code directly.
 
 1. Make sure Python ≥ 3.10 and install dependencies:
 
@@ -52,4 +91,3 @@ Players move, dodge, and block in the game of jumping and walking, experience th
    ```
    python src/main.py
    ```
-

@@ -153,6 +153,38 @@ class GameScreen:
             "born": pg.time.get_ticks(),
         })
 
+    def _font(self, key: str, fallback_px: int = 24) -> pg.font.Font:
+        """Safe font getter for HUD/float texts."""
+        try:
+            fdict = getattr(self.m, "fonts", {}) or {}
+            if key in fdict and fdict[key]:
+                return fdict[key]
+        except Exception:
+            pass
+        # soft fallback
+        try:
+            return pg.font.SysFont(None, fallback_px)
+        except Exception:
+            # last resort: reuse title if present
+            return getattr(self.m, "fonts", {}).get("title", pg.font.SysFont(None, 28))
+
+
+    # -- hit test: only check horizontal adjacency (ignore Y) --
+    def x_adjacent_touch(h_rect: pg.Rect, r_rect: pg.Rect, r_face: int) -> bool:
+        """
+        Return True if roo is facing human and their yellow boxes touch along X
+        with a small tolerance. Y overlap is NOT required by design.
+        - r_face < 0 : roo faces left  -> check human.right ~ roo.left
+        - r_face > 0 : roo faces right -> check roo.right ~ human.left
+        """
+        tol = getattr(CFG, "CONTACT_MAX_GAP_X", 10)
+        if r_face < 0:
+            # roo looking left: human on roo's left side
+            return abs(h_rect.right - r_rect.left) <= tol
+        else:
+            # roo looking right: human on roo's right side
+            return abs(r_rect.right - h_rect.left) <= tol
+
     # =====================  Tight yellow bbox helpers  =====================
 
     def _frame_tight_bbox(self, sprite, center_xy, *, flip_h: bool) -> pg.Rect:
@@ -392,17 +424,17 @@ class GameScreen:
             self.roo_punch_until = now + PUNCH_ANIM_MS
             self.last_punch_ms = now
 
-            # Hit test by tight yellow bboxes (+ optional fist-in-bbox)
-            h_rect = self.human_rect()
-            r_rect = self.roo_rect()
-            hit_ok = can_punch_yellow(h_rect, r_rect, self.r_face)
-            if hit_ok:
-                hit_ok = h_rect.collidepoint(self.roo_fist_point())
+            # === 使用与绘制相同的“贴边中心” ===
+            h_center, r_center = self._centers_screen()
+            h_rect = self.human_rect(h_center)
+            r_rect = self.roo_rect(r_center)
 
-            # Evade grace after human just moved
-            if hit_ok and (now - getattr(self, "last_human_step_ms", -999999)) <= getattr(CFG, "EVADE_GRACE_MS", 140):
-                hit_ok = False
-                self._dbg("Hit test: evaded by recent move")
+            # 仅做 X 相邻判定（左右两种情况）
+            hit_ok = can_punch_yellow(h_rect, r_rect, self.r_face)
+
+            # （可选）要求拳心点也进入对方黄框
+            if hit_ok and getattr(CFG, "REQUIRE_FIST_POINT", False):
+                hit_ok = h_rect.collidepoint(self.sprite_r.fist_point(r_center, flip_h=(self.r_face > 0)))
 
             if not hit_ok:
                 self.ai_pause_until = now + 220
@@ -417,8 +449,8 @@ class GameScreen:
                 self.hp_h.lose(PUNCH_BLOCKED_DAMAGE)
                 self.st_r.lose(BLOCK_SHARED_LOSS)
                 self.st_h.lose(BLOCK_SHARED_LOSS * 0.5)
-                # self._set_center_msg("BLOCK!", (230,230,230))
-                block_pos = self.human_rect().midtop
+
+                block_pos = h_rect.midtop
                 self._spawn_float_msg("BLOCK!", (230, 230, 230), (block_pos[0], block_pos[1] - 30))
 
                 self.hitstop_until = now + HITSTOP_MS
@@ -431,8 +463,8 @@ class GameScreen:
             try: self.sfx.get("hit") and self.sfx["hit"].play()
             except: pass
             self.hp_h.lose(PUNCH_DAMAGE)
-            # self._set_center_msg(f"-{PUNCH_DAMAGE} HP", (240,120,120))
-            hit_pos = self.human_rect().midtop
+
+            hit_pos = h_rect.midtop
             self._spawn_float_msg(f"-{PUNCH_DAMAGE} HP", (240, 80, 80), (hit_pos[0], hit_pos[1] - 20))
 
             self.hitstop_until = now + HITSTOP_MS
@@ -481,14 +513,17 @@ class GameScreen:
         if AI_FACE_ONLY:
             return
 
-        # Wind-up if visually adjacent on same row
-        h_rect = self.human_rect()
-        r_rect = self.roo_rect()
-        if AI_PUNCH_ENABLED and can_punch_yellow(h_rect, r_rect, self.r_face) and (now - self.last_punch_ms >= PUNCH_COOLDOWN_MS):
-            self.intend_punch = True
-            self.punch_windup_until = now + PUNCH_WINDUP_MS
-            self._dbg("Wind-up start")
-            return
+        # Wind-up if visually adjacent on same row（使用贴边中心）
+        if AI_PUNCH_ENABLED and (now - self.last_punch_ms >= PUNCH_COOLDOWN_MS):
+            h_center, r_center = self._centers_screen()
+            h_rect = self.human_rect(h_center)
+            r_rect = self.roo_rect(r_center)
+            if can_punch_yellow(h_rect, r_rect, self.r_face):
+                self.intend_punch = True
+                self.punch_windup_until = now + PUNCH_WINDUP_MS
+                self._dbg("Wind-up start")
+                return
+
 
         # Follow (prefer X, else Y)
         if AI_FOLLOW_ENABLED and (now - self.last_ai_ms >= getattr(CFG, "AI_DECIDE_EVERY_MS", 120)):
@@ -573,17 +608,18 @@ class GameScreen:
         alive_msgs = []
         for msg in self.float_msgs:
             age = now_ms - msg["born"]
-            if age > 1200:  # 1.2s lifespan
+            if age > 1200:
                 continue
             fade = max(0, 255 - int(age / 1200 * 255))
-            y_off = -int(age / 25)  # upward motion
-            font = self.m.fonts["small"]
+            y_off = -int(age / 25)
+            font = self._font("small", 24)   # use safe font
             img = font.render(msg["text"], True, msg["color"])
             img.set_alpha(fade)
             pos = (msg["pos"][0] - img.get_width() // 2, msg["pos"][1] + y_off)
             s.blit(img, pos)
             alive_msgs.append(msg)
         self.float_msgs = alive_msgs
+
 
         # Round popup
         if self.popup_until > now and self.popup_kind:
@@ -598,15 +634,21 @@ class GameScreen:
 # =====================  Helpers  =====================
 def can_punch_yellow(h_rect: pg.Rect, r_rect: pg.Rect, r_face: int) -> bool:
     """
-    Visual adjacency using *tight* yellow bboxes:
-      - Require minimum vertical overlap (CONTACT_MIN_Y_OVERLAP).
-      - Allow a tiny negative horizontal gap to remove the visible slit (CONTACT_MAX_GAP_X ≤ 0).
+    X-only adjacency for hit confirm.
+    We only require that the two tight yellow boxes *touch* horizontally
+    in the facing direction, with a small tolerance. No Y-overlap check.
+      - r_face > 0 (right): roo.right ~ human.left
+      - r_face < 0 (left) : human.right ~ roo.left
+    Tolerance can be tuned with CFG.CONTACT_MAX_GAP_X (default 8).
     """
-    y_overlap = max(0, min(h_rect.bottom, r_rect.bottom) - max(h_rect.top, r_rect.top))
-    if y_overlap < CONTACT_MIN_Y_OVERLAP:
-        return False
-    if r_face > 0:   # roo faces right → human must be on roo's right
+    tol = getattr(CFG, "CONTACT_MAX_GAP_X", 8)  # allow tiny slit/overdraw
+
+    if r_face > 0:
+        # Roo faces right -> human must be on its right side
         gap = h_rect.left - r_rect.right
-    else:            # roo faces left → human must be on roo's left
+        return abs(gap) <= tol
+    else:
+        # Roo faces left -> human must be on its left side
         gap = r_rect.left - h_rect.right
-    return gap <= CONTACT_MAX_GAP_X
+        return abs(gap) <= tol
+

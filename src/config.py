@@ -46,7 +46,7 @@ class _CFG:
 
     # --- Gameplay timing ---
     FPS: int = 60
-    ROUND_SECONDS: int = 45
+    ROUND_SECONDS: int = 20
 
     # Evade & combat
     EVADE_GRACE_MS: int = 120
@@ -56,7 +56,7 @@ class _CFG:
 
     # AI pacing
     AI_DECIDE_EVERY_MS: int = 800
-    PUNCH_COOLDOWN_MS: int = 1000
+    PUNCH_COOLDOWN_MS: int = 500
     PUNCH_ANIM_MS: int = 300
     PUNCH_WINDUP_MS: int = 500
 
@@ -94,9 +94,12 @@ class _CFG:
     FLOAT_MSG_RISE_SPEED = 25
 
     # ------碰撞检测 fix---------
-    CONTACT_MAX_GAP_X = 10  # 允许的“几乎贴脸”负/正间隙，越大越贴
-    CONTACT_MIN_Y_OVERLAP = 24  # 认为“同一行”的最小竖向重叠像素，越大越严格
-    BASELINE_MARGIN = 4  # 行基线向上留的像素，避免踩线
+    CONTACT_MAX_GAP_X = 10  # 允许轻微“肉贴肉”的横向负/正间隙
+    CONTACT_MIN_Y_OVERLAP = 24
+    BASELINE_MARGIN = 4
+
+    # 命中判定是否“必须”拳心点进入对方黄框（默认 False：只要黄框相邻就算命中）
+    REQUIRE_FIST_POINT: bool = False
 
     # --- snap tuning for face-to-face stick ---
     SNAP_EXTRA_X: int = 1  # extra pixels to "overlap" when snapping two yellow bboxes (visual stickiness)
