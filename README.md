@@ -23,9 +23,7 @@ After the latest update, the game may **crash** right after entering the main sc
 
 
 
----
-
-### 💬 Developer’s Note
+## 💬 Developer’s Note
 
 This project was built **within 24 hours** as part of a solo creative challenge.
 
@@ -45,7 +43,7 @@ The next goal is to deliver a **stable, fully playable single-player version** a
 >
 > And so, a strange duel begins…
 
----
+
 
 ## **Description:**
 
@@ -71,6 +69,8 @@ Players move, dodge, and block in the game of jumping and walking, experience th
 - Block: both sides lose stamina
 - Each kangaroo jump consumes more stamina
 - Stalemate scenario: due to movement differences, sometimes they can never reach each other → becomes a strategy point
+
+
 
 ---
 
