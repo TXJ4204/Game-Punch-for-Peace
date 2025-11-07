@@ -126,7 +126,10 @@ class GameScreen:
         except: pass
 
         # floating damage messages
-        self.float_msgs: list[dict] = []  # each: {"text": str, "color": (r,g,b), "pos": (x,y), "born": ms}
+        #self.float_msgs: list[dict] = []  # each: {"text": str, "color": (r,g,b), "pos": (x,y), "born": ms}
+
+        self.float_msgs = []  # top-over-head popups
+        self.debug_events = []  # bottom-right short logs
 
     # ---------- debug print ----------
     def _dbg(self, msg: str):
@@ -142,32 +145,45 @@ class GameScreen:
         self.msg_color = color
         self.msg_until = pg.time.get_ticks() + ms
 
-    def _spawn_float_msg(self, text: str, color=(255, 80, 80), pos=None):
-        """Spawn a floating text message that rises and fades out."""
-        if pos is None:
-            pos = self.play_rect.center
+    def _spawn_float_msg(self, text, color, pos, ms=900):
+        t = pg.time.get_ticks()
         self.float_msgs.append({
+            # 新结构（上面的“rise and fade”用）
             "text": text,
             "color": color,
-            "pos": pos,
-            "born": pg.time.get_ticks(),
+            "x": float(pos[0]),
+            "y": float(pos[1]),
+            "until": t + ms,
+            # 兼容旧结构（避免 KeyError: 'born' / 'pos'）
+            "born": t,
+            "pos": (int(pos[0]), int(pos[1])),
         })
 
-    def _font(self, key: str, fallback_px: int = 24) -> pg.font.Font:
-        """Safe font getter for HUD/float texts."""
-        try:
-            fdict = getattr(self.m, "fonts", {}) or {}
-            if key in fdict and fdict[key]:
-                return fdict[key]
-        except Exception:
-            pass
-        # soft fallback
-        try:
-            return pg.font.SysFont(None, fallback_px)
-        except Exception:
-            # last resort: reuse title if present
-            return getattr(self.m, "fonts", {}).get("title", pg.font.SysFont(None, 28))
+    # def _font(self, key: str, fallback_px: int = 24) -> pg.font.Font:
+    #     """Safe font getter for HUD/float texts."""
+    #     try:
+    #         fdict = getattr(self.m, "fonts", {}) or {}
+    #         if key in fdict and fdict[key]:
+    #             return fdict[key]
+    #     except Exception:
+    #         pass
+    #     # soft fallback
+    #     try:
+    #         return pg.font.SysFont(None, fallback_px)
+    #     except Exception:
+    #         # last resort: reuse title if present
+    #         return getattr(self.m, "fonts", {}).get("title", pg.font.SysFont(None, 28))
 
+    def _font(self, name, size_fallback=18):
+        f = self.m.fonts.get(name)
+        if f: return f
+        return pg.font.SysFont(None, size_fallback)
+
+    def _log_event(self, text, color=(230, 230, 230), ms=1400):
+        self.debug_events.append({
+            "text": text, "color": color,
+            "until": pg.time.get_ticks() + ms
+        })
 
     # -- hit test: only check horizontal adjacency (ignore Y) --
     def x_adjacent_touch(h_rect: pg.Rect, r_rect: pg.Rect, r_face: int) -> bool:
@@ -371,12 +387,62 @@ class GameScreen:
 
     def _set_blocking(self, on: bool):
         self.blocking = bool(on)
+        # if on:
+        #     self.last_block_down_ms = pg.time.get_ticks()
         if on:
             self.last_block_down_ms = pg.time.get_ticks()
+            # 右下角提示（与 debug 分开显示）
+            self.debug_events.append({
+                "text": "You: BLOCK (holding)",
+                "color": (210, 230, 255),
+                "until": pg.time.get_ticks() + 1200,
+                "kind": "hint",
+            })
+        else:
+            self.debug_events.append({
+                "text": "You: BLOCK release",
+                "color": (210, 230, 255),
+                "until": pg.time.get_ticks() + 900,
+                "kind": "hint",
+            })
 
     # =====================  Update  =====================
     def update(self, dt_ms: int):
         now = pg.time.get_ticks()
+
+        # —— 回合弹窗期间：完全冻结逻辑 —— #
+        if self.popup_until > now:
+            return
+
+        # —— 弹窗刚结束：启动下一回合/或结束比赛 —— #
+        if self.popup_kind and self.popup_until <= now:
+            # 清除弹窗标志
+            self.popup_kind, self.popup_until = None, 0
+            if self.round_idx < 3:
+                # 进入下一回合
+                self.round_idx += 1
+                # 血量/体力恢复
+                self.hp_h.reset()
+                self.st_h.reset();
+                self.st_r.reset()
+                # 位置与朝向复位
+                self.human.pos = (1, CFG.GRID_H // 2)
+                self.roo.pos = (CFG.GRID_W - 2, CFG.GRID_H // 2)
+                self.h_face = R_FACE_RIGHT
+                self.r_face = R_FACE_LEFT
+                # 清理临时渲染 & 重新计时
+                self.float_msgs.clear()
+                self.debug_events.clear()
+                self.round_start = now
+                self.overtime_started = None
+                # 可选：给个开场短提示
+                self._set_center_msg(f"Round {self.round_idx}", (255, 255, 255), ms=800)
+            else:
+                # 3 回合结束：比赛结束（先停住；如需跳转 EndScreen 可在此处调用）
+                self._set_center_msg("Match Over", (255, 255, 255), ms=1800)
+                # 停在“结束”状态：给一个很久的冻结
+                self.popup_until = now + 10_000_000
+                return
 
         # Hitstop keeps animation running via draw()
         if now < self.hitstop_until:
@@ -390,6 +456,14 @@ class GameScreen:
                 self._set_blocking(False)
         else:
             self.st_h.cur = min(self.st_h.max, self.st_h.cur + ST_REGEN_PER_SEC_H * dt_sec)
+
+        # —— 回合倒计时判定 —— #
+        elapsed_sec = (now - self.round_start) // 1000
+        if elapsed_sec >= ROUND_SECONDS and self.popup_kind is None:
+            # 简单胜负：人类还活着 → Win；否则 Lose；（你后续有人类出拳后可再细化判定）
+            winner = "human" if (self.hp_h.cur > 0 and self.lives_halves > 0) else "roo"
+            self._end_round(winner)
+            return
 
         # Human move (continuous keyboard + cooldown + stamina)
         keys = pg.key.get_pressed()
@@ -424,34 +498,38 @@ class GameScreen:
             self.roo_punch_until = now + PUNCH_ANIM_MS
             self.last_punch_ms = now
 
-            # === 使用与绘制相同的“贴边中心” ===
+            # Use the same snapped centers as drawing
             h_center, r_center = self._centers_screen()
             h_rect = self.human_rect(h_center)
             r_rect = self.roo_rect(r_center)
 
-            # 仅做 X 相邻判定（左右两种情况）
             hit_ok = can_punch_yellow(h_rect, r_rect, self.r_face)
 
-            # （可选）要求拳心点也进入对方黄框
+            # Optional: also require the fist anchor to be inside target bbox
             if hit_ok and getattr(CFG, "REQUIRE_FIST_POINT", False):
                 hit_ok = h_rect.collidepoint(self.sprite_r.fist_point(r_center, flip_h=(self.r_face > 0)))
 
             if not hit_ok:
                 self.ai_pause_until = now + 220
-                self._dbg("Punch result: whiff -> short pause")
+                self._dbg("Punch result: WHIFF")
+                self._log_event("Roo punch: miss", (200, 200, 200))
                 return
 
             # BLOCK or HIT
             if self.blocking:
                 self._dbg("Punch result: BLOCK")
-                try: self.sfx.get("block") and self.sfx["block"].play()
-                except: pass
+                try:
+                    self.sfx.get("block") and self.sfx["block"].play()
+                except:
+                    pass
+
                 self.hp_h.lose(PUNCH_BLOCKED_DAMAGE)
                 self.st_r.lose(BLOCK_SHARED_LOSS)
                 self.st_h.lose(BLOCK_SHARED_LOSS * 0.5)
 
-                block_pos = h_rect.midtop
-                self._spawn_float_msg("BLOCK!", (230, 230, 230), (block_pos[0], block_pos[1] - 30))
+                pos = h_rect.midtop
+                self._spawn_float_msg("BLOCK!", (230, 230, 230), (pos[0], pos[1] - 26))
+                self._log_event("Roo punch → BLOCK", (230, 230, 230))
 
                 self.hitstop_until = now + HITSTOP_MS
                 self._roo_step_back()
@@ -459,13 +537,17 @@ class GameScreen:
                 self.score_r += 1
                 return
 
+            # HIT
             self._dbg("Punch result: HIT")
-            try: self.sfx.get("hit") and self.sfx["hit"].play()
-            except: pass
-            self.hp_h.lose(PUNCH_DAMAGE)
+            try:
+                self.sfx.get("hit") and self.sfx["hit"].play()
+            except:
+                pass
 
-            hit_pos = h_rect.midtop
-            self._spawn_float_msg(f"-{PUNCH_DAMAGE} HP", (240, 80, 80), (hit_pos[0], hit_pos[1] - 20))
+            self.hp_h.lose(PUNCH_DAMAGE)
+            pos = h_rect.midtop
+            self._spawn_float_msg(f"-{PUNCH_DAMAGE} HP", (240, 80, 80), (pos[0], pos[1] - 20))
+            self._log_event(f"Roo punch → HIT (-{PUNCH_DAMAGE})", (240, 120, 120))
 
             self.hitstop_until = now + HITSTOP_MS
             self.score_r += 1
@@ -473,7 +555,7 @@ class GameScreen:
             if self.hp_h.cur <= 0:
                 self.lives_halves = max(0, self.lives_halves - 1)
                 self.hp_h.reset()
-                self._set_center_msg("- 1/2 ♥", (245,120,120), ms=900)
+                self._set_center_msg("- 1/2 ♥", (245, 120, 120), ms=900)
                 self._dbg(f"Half-heart lost -> {self.lives_halves}")
                 if self.lives_halves == 0:
                     self._end_round("roo")
@@ -513,8 +595,11 @@ class GameScreen:
         if AI_FACE_ONLY:
             return
 
-        # Wind-up if visually adjacent on same row（使用贴边中心）
-        if AI_PUNCH_ENABLED and (now - self.last_punch_ms >= PUNCH_COOLDOWN_MS):
+        # Wind-up if visually adjacent on same row (guard: do not re-start if already winding)
+        if (AI_PUNCH_ENABLED
+                and (now - self.last_punch_ms >= PUNCH_COOLDOWN_MS)
+                and not getattr(self, "intend_punch", False)
+                and now >= getattr(self, "ai_pause_until", 0)):
             h_center, r_center = self._centers_screen()
             h_rect = self.human_rect(h_center)
             r_rect = self.roo_rect(r_center)
@@ -522,8 +607,8 @@ class GameScreen:
                 self.intend_punch = True
                 self.punch_windup_until = now + PUNCH_WINDUP_MS
                 self._dbg("Wind-up start")
+                self._log_event("Roo wind-up", (200, 200, 255))
                 return
-
 
         # Follow (prefer X, else Y)
         if AI_FOLLOW_ENABLED and (now - self.last_ai_ms >= getattr(CFG, "AI_DECIDE_EVERY_MS", 120)):
@@ -589,6 +674,19 @@ class GameScreen:
         for _, cxy, spr, flip in entities:
             spr.draw(s, cxy, flip_h=flip)
 
+        # floating texts (rise and fade)
+        now = pg.time.get_ticks()
+        small = self._font("small", 18)
+        alive = []
+        for itm in self.float_msgs:
+            if now >= itm["until"]:
+                continue
+            itm["y"] -= 0.25  # drift up
+            img = small.render(itm["text"], True, itm["color"])
+            self.m.screen.blit(img, img.get_rect(center=(int(itm["x"]), int(itm["y"]))))
+            alive.append(itm)
+        self.float_msgs = alive
+
         # Debug overlays (always use same centers as rendering)
         if getattr(CFG, "DEBUG", False):
             h_bbox = self.human_rect(h_center)
@@ -598,28 +696,36 @@ class GameScreen:
             fx, fy = self.sprite_r.fist_point(r_center, flip_h=(self.r_face > 0))
             pg.draw.circle(s, (230, 80, 80), (fx, fy), 5, 0)
 
-        # Center message
+        # Center message（含 ♥ 的回退字库）
         if now < self.msg_until and self.msg_text:
-            img = self.m.fonts["title"].render(self.msg_text, True, self.msg_color)
+            text = self.msg_text
+            font = self.m.fonts["title"]
+            # 如果包含 ♥，尝试用包含符号的系统字库临时渲染
+            if "♥" in text:
+                try:
+                    # 取与 title 大致相同字号
+                    size_guess = font.get_height()
+                    sym = pg.font.SysFont("Segoe UI Symbol", size_guess) or pg.font.SysFont("Arial Unicode MS",
+                                                                                            size_guess)
+                    img = sym.render(text, True, self.msg_color)
+                except Exception:
+                    img = font.render(text, True, self.msg_color)
+            else:
+                img = font.render(text, True, self.msg_color)
             s.blit(img, img.get_rect(center=self.play_rect.center))
 
-        # Floating damage / block messages
-        now_ms = pg.time.get_ticks()
-        alive_msgs = []
-        for msg in self.float_msgs:
-            age = now_ms - msg["born"]
-            if age > 1200:
-                continue
-            fade = max(0, 255 - int(age / 1200 * 255))
-            y_off = -int(age / 25)
-            font = self._font("small", 24)   # use safe font
-            img = font.render(msg["text"], True, msg["color"])
-            img.set_alpha(fade)
-            pos = (msg["pos"][0] - img.get_width() // 2, msg["pos"][1] + y_off)
-            s.blit(img, pos)
-            alive_msgs.append(msg)
-        self.float_msgs = alive_msgs
-
+        # bottom-right debug event log
+        alive = []
+        x = self.W - 18
+        y = self.H - 14
+        for itm in reversed(self.debug_events[-6:]):  # last few lines
+            if now < itm["until"]:
+                img = small.render(itm["text"], True, itm["color"])
+                r = img.get_rect(bottomright=(x, y))
+                self.m.screen.blit(img, r)
+                y -= r.height + 4
+                alive.append(itm)
+        self.debug_events = [e for e in self.debug_events if now < e["until"]]
 
         # Round popup
         if self.popup_until > now and self.popup_kind:
