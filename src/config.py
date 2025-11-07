@@ -1,4 +1,3 @@
-# src/config.py
 from dataclasses import dataclass
 
 @dataclass
@@ -13,10 +12,10 @@ class _CFG:
     COL_GRID_LIGHT: tuple = (62, 68, 78)  # board light
     COL_GRID_DARK:  tuple = (48, 54, 63)  # board dark
 
-    # config.py 里的 CFG 颜色建议
+    # basic color
     COL_PANEL_BG = (55, 60, 70)
     COL_PANEL_OUTLINE = (25, 28, 34)
-    COL_PANEL_OUTLINE_HI = (70, 130, 200)  # 选中边框蓝
+    COL_PANEL_OUTLINE_HI = (70, 130, 200)  # selected border blue
     COL_TEXT02 = (230, 235, 238)
     COL_TIP = (190, 190, 195)
     COL_ICON_SINGLE = (80, 160, 240)
@@ -36,13 +35,13 @@ class _CFG:
     GRID_DARK:  tuple = COL_GRID_DARK
 
     # --- Hitbox config ---
-    HITBOX_MODE = "bbox"  # "bbox" | "parts" | "mask"，本次用 bbox（黄色框）
+    HITBOX_MODE = "bbox"  # "bbox" | "parts" | "mask", using bbox (yellow box) this time
     HITBOX_JSON = "assets/animation/hitbox_meta.json"
 
     # --- Debug draw toggles ---
-    SHOW_BBOX = True  # 画黄色紧外接框
-    SHOW_PARTS = False  # 关掉绿色小块
-    SHOW_MASK = False  # 暂不渲染多边形
+    SHOW_BBOX = True   # draw yellow tight bounding box
+    SHOW_PARTS = False # disable green parts
+    SHOW_MASK = False  # don't render polygon yet
 
     # --- Gameplay timing ---
     FPS: int = 60
@@ -93,22 +92,23 @@ class _CFG:
     FLOAT_MSG_DURATION_MS = 1200
     FLOAT_MSG_RISE_SPEED = 25
 
-    # ------碰撞检测 fix---------
-    CONTACT_MAX_GAP_X = 10  # 允许轻微“肉贴肉”的横向负/正间隙
+    # ------ Collision detection fix ---------
+    CONTACT_MAX_GAP_X = 10  # allow small positive/negative horizontal overlap (“flesh contact”)
     CONTACT_MIN_Y_OVERLAP = 24
     BASELINE_MARGIN = 4
 
-    # 命中判定是否“必须”拳心点进入对方黄框（默认 False：只要黄框相邻就算命中）
+    # Whether hit detection “must” require fist point to enter opponent’s yellow box
+    # (default False: adjacent yellow boxes count as a hit)
     REQUIRE_FIST_POINT: bool = False
 
     # --- snap tuning for face-to-face stick ---
-    SNAP_EXTRA_X: int = 1  # extra pixels to "overlap" when snapping two yellow bboxes (visual stickiness)
+    SNAP_EXTRA_X: int = 1  # extra pixels to “overlap” when snapping two yellow bboxes (visual stickiness)
     SNAP_VERT_SLOP: int = 6  # vertical tolerance (pixels) to allow snap on same row
 
     # --- Debug & control toggles ---
-    DEBUG: bool = True                    # print simple english logs to console
+    DEBUG: bool = True                     # print simple English logs to console
     AI_TURN_ONLY_MODE: bool = False        # <<< TEMP: only face the player, do not move/punch
-    AI_ALLOW_MOVE: bool = True            # master switch for moving when we re-enable
-    AI_ALLOW_PUNCH: bool = True           # master switch for punch when we re-enable
+    AI_ALLOW_MOVE: bool = True             # master switch for enabling movement
+    AI_ALLOW_PUNCH: bool = True            # master switch for enabling punching
 
 CFG = _CFG()

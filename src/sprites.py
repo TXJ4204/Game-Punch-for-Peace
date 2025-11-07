@@ -10,12 +10,12 @@ from src.config import CFG
 # -----------------------------------------------------------------------------
 # Paths & defaults
 # -----------------------------------------------------------------------------
-# 资源目录：统一指向 assets/animation
+# Resource directory: unified to assets/animation
 _ASSET_DIR = Path(__file__).resolve().parents[1] / "assets" / "animation"
 
-# 命中盒模式默认值
+# Default hitbox mode
 _HITBOX_MODE_DEFAULT = "parts"  # "bbox" | "parts" | "mask"
-# 命中盒 JSON 默认路径
+# Default hitbox JSON path
 _HITBOX_JSON_DEFAULT = str(_ASSET_DIR / "hitbox_meta.json")
 
 
@@ -83,7 +83,7 @@ def get_hit_shape(img_name: str, surf: pg.Surface) -> dict:
 
     mode = _hitbox_mode()
 
-    # Pixel/contour polygon（编辑器存的是 maskPoly）
+    # Pixel/contour polygon (the editor stores it as maskPoly)
     if mode == "mask" and meta.get("maskPoly"):
         return {"type": "poly", "pts": [tuple(p) for p in meta["maskPoly"]]}
 
@@ -196,16 +196,16 @@ class SimpleSprite:
     def fist_point(self, center_xy: Tuple[int, int], flip_h: bool = False) -> Tuple[int, int]:
         """
         Compute fist anchor (screen space) from JSON meta:
-          - 对“未翻转”的图像坐标：people 用 punchR，roo 用 punchL
-          - 当 flip_h=True 时进行镜像换算
-        如果未提供点，退化为当前帧中心。
+          - For "unflipped" image coordinates: people use punchR, roo uses punchL
+          - When flip_h=True, apply mirroring conversion
+        If not provided, fall back to current frame center.
         """
         name = self.current_image_name()
         meta = load_hit_meta().get(name, {})
 
-        # 约定：人物朝右时拳点在右；袋鼠朝左时拳点在左
-        # 这里统一逻辑：未翻转时优先用 punchR；翻转后使用镜像（或使用 punchL）
-        # 为避免数据不全，先取 punchR，没有则 punchL
+        # Convention: when the human faces right, the punch point is on the right; when the roo faces left, the punch point is on the left
+        # Use punchR by default when not flipped; use mirrored (or punchL) when flipped
+        # To avoid missing data, try punchR first, otherwise punchL
         pt = meta.get("punchR", None)
         if pt is None:
             pt = meta.get("punchL", None)
@@ -214,17 +214,17 @@ class SimpleSprite:
         sw, sh = surf.get_size()
 
         if pt is None:
-            # 无锚点 → 用绘制中心
+            # No anchor → use draw center
             draw_rect = self.get_draw_rect(center_xy, flip_h=flip_h)
             return draw_rect.center
 
-        # 原图到现图的缩放（根据记录的原尺寸）
+        # Scaling from original image to current image (based on recorded original size)
         ow, oh = self.current_orig_size()
         sx = sw / max(1, ow)
         sy = sh / max(1, oh)
         px, py = pt[0] * sx, pt[1] * sy
 
-        # 如有水平翻转 → 镜像 X
+        # If horizontally flipped → mirror X
         if flip_h:
             px = sw - px
 
@@ -235,12 +235,11 @@ class SimpleSprite:
     def hit_rects(self, center_xy: Tuple[int, int], flip_h: bool = False) -> List[pg.Rect]:
         """
         Map image-space hit shapes to screen-space rectangles using
-        current frame draw rect.（poly 模式当前退化为其外接框）
+        current frame draw rect. (poly mode currently degrades to its bounding box)
         """
         img = self.current_surface()
         name = self.current_image_name()
-        # 注意：flip 对于 parts/bbox 影响很小（左右对称时可忽略）；
-        # 如需严格镜像 rect，可在此对 x 做 (sw - x - w) 变换，再映射到屏幕。
+        # Note: flip has minimal effect on parts/bbox (can be ignored if left-right symmetric)
         draw_rect = self.get_draw_rect(center_xy, flip_h=flip_h)
         left, top = draw_rect.x, draw_rect.y
 
@@ -249,14 +248,13 @@ class SimpleSprite:
 
         if shape["type"] == "rects":
             for (x, y, w, h) in shape["rects"]:
-                # 如开启 flip，可在此镜像：x = img.get_width() - x - w
                 if flip_h:
                     x = img.get_width() - x - w
                 rects.append(pg.Rect(int(left + x), int(top + y), int(w), int(h)))
         elif shape["type"] == "poly":
             pts = shape["pts"]
             if pts:
-                # 若 flip：镜像多边形点
+                # If flipped: mirror polygon points
                 if flip_h:
                     sw = img.get_width()
                     pts = [(sw - px, py) for (px, py) in pts]
@@ -267,8 +265,8 @@ class SimpleSprite:
 
     def bbox_rect(self, center_xy: tuple[int, int], flip_h: bool = False) -> pg.Rect:
         """
-        返回当前帧在屏幕坐标下的“黄色紧外接框”（单个 Rect）。
-        若 JSON 没有 bbox，则退化为整图外接框。
+        Return the current frame’s “yellow tight bounding box” in screen coordinates (a single Rect).
+        If JSON has no bbox, fall back to the full image bounding box.
         """
         img = self.current_surface()
         name = self.current_image_name()
@@ -276,14 +274,14 @@ class SimpleSprite:
         left, top = draw_rect.x, draw_rect.y
 
         meta = load_hit_meta().get(name, {})
-        # 优先 JSON 中的 bbox
+        # Prefer bbox from JSON
         if meta.get("bbox"):
             x, y, w, h = meta["bbox"]
             if flip_h:
                 x = img.get_width() - x - w
             return pg.Rect(int(left + x), int(top + y), int(w), int(h))
 
-        # 退化：整图
+        # Fallback: full image
         return draw_rect.copy()
 
 
@@ -299,7 +297,7 @@ def _make_frame_tuple(img: pg.Surface, name: str, cell_w: int, cell_h: int, rati
 
 
 def make_people_sprite(cell_w: int, cell_h: int, fps_idle: float = 3) -> SimpleSprite:
-    # people01, people02 idle；people03 block
+    # people01, people02 idle; people03 block
     p1_name, p2_name, pb_name = "people01.png", "people02.png", "people03.png"
 
     p1 = _make_frame_tuple(_load(p1_name), p1_name, cell_w, cell_h, 1.30)
@@ -314,7 +312,7 @@ def make_people_sprite(cell_w: int, cell_h: int, fps_idle: float = 3) -> SimpleS
 
 
 def make_roo_sprite(cell_w: int, cell_h: int, fps_idle: float = 4) -> SimpleSprite:
-    # roo01 idle, roo02 jump, roo04 punch（roo03 可后续加入）
+    # roo01 idle, roo02 jump, roo04 punch (roo03 can be added later)
     r1_name, r2_name, r4_name = "roo01.png", "roo02.png", "roo04.png"
 
     r1 = _make_frame_tuple(_load(r1_name), r1_name, cell_w, cell_h, 1.30)

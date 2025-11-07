@@ -84,6 +84,9 @@ class GameScreen:
         self.round_start = pg.time.get_ticks()
         self.overtime_started = None
 
+        self.round_results = [None, None, None]  # Record each round result: 'human' / 'roo' / 'tie' / None
+        self._freeze_for_overlay = False  # Freeze update during the result overlay
+
         # Runtime states
         self.blocking = False
         self.last_block_down_ms = -10_000
@@ -125,9 +128,6 @@ class GameScreen:
         try: pg.mixer.init()
         except: pass
 
-        # floating damage messages
-        #self.float_msgs: list[dict] = []  # each: {"text": str, "color": (r,g,b), "pos": (x,y), "born": ms}
-
         self.float_msgs = []  # top-over-head popups
         self.debug_events = []  # bottom-right short logs
 
@@ -148,31 +148,17 @@ class GameScreen:
     def _spawn_float_msg(self, text, color, pos, ms=900):
         t = pg.time.get_ticks()
         self.float_msgs.append({
-            # 新结构（上面的“rise and fade”用）
+            # New structure (used for the “rise and fade” effect above)
             "text": text,
             "color": color,
             "x": float(pos[0]),
             "y": float(pos[1]),
             "until": t + ms,
-            # 兼容旧结构（避免 KeyError: 'born' / 'pos'）
+            # Compatible with old structure (avoid KeyError: 'born' / 'pos')
+
             "born": t,
             "pos": (int(pos[0]), int(pos[1])),
         })
-
-    # def _font(self, key: str, fallback_px: int = 24) -> pg.font.Font:
-    #     """Safe font getter for HUD/float texts."""
-    #     try:
-    #         fdict = getattr(self.m, "fonts", {}) or {}
-    #         if key in fdict and fdict[key]:
-    #             return fdict[key]
-    #     except Exception:
-    #         pass
-    #     # soft fallback
-    #     try:
-    #         return pg.font.SysFont(None, fallback_px)
-    #     except Exception:
-    #         # last resort: reuse title if present
-    #         return getattr(self.m, "fonts", {}).get("title", pg.font.SysFont(None, 28))
 
     def _font(self, name, size_fallback=18):
         f = self.m.fonts.get(name)
@@ -391,7 +377,7 @@ class GameScreen:
         #     self.last_block_down_ms = pg.time.get_ticks()
         if on:
             self.last_block_down_ms = pg.time.get_ticks()
-            # 右下角提示（与 debug 分开显示）
+            # Bottom-right hint (displayed separately from debug info)
             self.debug_events.append({
                 "text": "You: BLOCK (holding)",
                 "color": (210, 230, 255),
@@ -408,39 +394,44 @@ class GameScreen:
 
     # =====================  Update  =====================
     def update(self, dt_ms: int):
+
+        # Freeze before any logic
+        if self._freeze_for_overlay:
+            return
+
         now = pg.time.get_ticks()
 
-        # —— 回合弹窗期间：完全冻结逻辑 —— #
+        # —— During round popup: completely freeze logic —— #
         if self.popup_until > now:
             return
 
-        # —— 弹窗刚结束：启动下一回合/或结束比赛 —— #
+        # —— When popup just ends: start next round / or end match —— #
         if self.popup_kind and self.popup_until <= now:
-            # 清除弹窗标志
+            # Clear popup flags
             self.popup_kind, self.popup_until = None, 0
             if self.round_idx < 3:
-                # 进入下一回合
+                # Enter next round
                 self.round_idx += 1
-                # 血量/体力恢复
+                # Restore HP/stamina
                 self.hp_h.reset()
                 self.st_h.reset();
                 self.st_r.reset()
-                # 位置与朝向复位
+                # Reset positions and facing
                 self.human.pos = (1, CFG.GRID_H // 2)
                 self.roo.pos = (CFG.GRID_W - 2, CFG.GRID_H // 2)
                 self.h_face = R_FACE_RIGHT
                 self.r_face = R_FACE_LEFT
-                # 清理临时渲染 & 重新计时
+                # Clear transient renders & reset timer
                 self.float_msgs.clear()
                 self.debug_events.clear()
                 self.round_start = now
                 self.overtime_started = None
-                # 可选：给个开场短提示
+                # Optional: give a short opening hint
                 self._set_center_msg(f"Round {self.round_idx}", (255, 255, 255), ms=800)
             else:
-                # 3 回合结束：比赛结束（先停住；如需跳转 EndScreen 可在此处调用）
+                # After 3 rounds: match over (pause here; call EndScreen jump here if needed)
                 self._set_center_msg("Match Over", (255, 255, 255), ms=1800)
-                # 停在“结束”状态：给一个很久的冻结
+                # Stay in 'ended' state: apply a very long freeze
                 self.popup_until = now + 10_000_000
                 return
 
@@ -457,10 +448,10 @@ class GameScreen:
         else:
             self.st_h.cur = min(self.st_h.max, self.st_h.cur + ST_REGEN_PER_SEC_H * dt_sec)
 
-        # —— 回合倒计时判定 —— #
+        # —— Round countdown check —— #
         elapsed_sec = (now - self.round_start) // 1000
         if elapsed_sec >= ROUND_SECONDS and self.popup_kind is None:
-            # 简单胜负：人类还活着 → Win；否则 Lose；（你后续有人类出拳后可再细化判定）
+            # Simple win/lose: if human still alive → Win; otherwise Lose; (you can refine once human can punch later)
             winner = "human" if (self.hp_h.cur > 0 and self.lives_halves > 0) else "roo"
             self._end_round(winner)
             return
@@ -470,12 +461,17 @@ class GameScreen:
         if now - self.last_move_ms >= MOVE_COOLDOWN_MS:
             hx, hy = self.human.pos
             nx, ny = hx, hy
-            if keys[pg.K_UP]:    ny -= 1
-            elif keys[pg.K_DOWN]: ny += 1
-            elif keys[pg.K_LEFT]: nx -= 1; self.h_face = R_FACE_LEFT
-            elif keys[pg.K_RIGHT]:nx += 1; self.h_face = R_FACE_RIGHT
+            if keys[pg.K_UP]:
+                ny -= 1
+            elif keys[pg.K_DOWN]:
+                ny += 1
+            elif keys[pg.K_LEFT]:
+                nx -= 1; self.h_face = R_FACE_LEFT
+            elif keys[pg.K_RIGHT]:
+                nx += 1; self.h_face = R_FACE_RIGHT
 
-            if (nx, ny) != (hx, hy) and self.human.can_move(nx, ny, roo_pos=self.roo.pos, cols=CFG.GRID_W, rows=CFG.GRID_H):
+            if (nx, ny) != (hx, hy) and self.human.can_move(nx, ny, roo_pos=self.roo.pos, cols=CFG.GRID_W,
+                                                            rows=CFG.GRID_H):
                 if self.st_h.cur >= WALK_COST:
                     self.human.move_to(nx, ny)
                     self.st_h.lose(WALK_COST)
@@ -529,7 +525,7 @@ class GameScreen:
 
                 pos = h_rect.midtop
                 self._spawn_float_msg("BLOCK!", (230, 230, 230), (pos[0], pos[1] - 26))
-                self._log_event("Roo punch → BLOCK", (230, 230, 230))
+                self._log_event("Roo punch -> BLOCK", (230, 230, 230))
 
                 self.hitstop_until = now + HITSTOP_MS
                 self._roo_step_back()
@@ -547,7 +543,7 @@ class GameScreen:
             self.hp_h.lose(PUNCH_DAMAGE)
             pos = h_rect.midtop
             self._spawn_float_msg(f"-{PUNCH_DAMAGE} HP", (240, 80, 80), (pos[0], pos[1] - 20))
-            self._log_event(f"Roo punch → HIT (-{PUNCH_DAMAGE})", (240, 120, 120))
+            self._log_event(f"Roo punch -> HIT (-{PUNCH_DAMAGE})", (240, 120, 120))
 
             self.hitstop_until = now + HITSTOP_MS
             self.score_r += 1
@@ -623,8 +619,71 @@ class GameScreen:
                 self.sprite_r.set_state("jump")
 
     def _end_round(self, winner: str):
-        self.popup_kind = {"roo": "lose", "human": "win"}.get(winner, "tie")
-        self.popup_until = pg.time.get_ticks() + 1200
+        # winner: 'human' / 'roo' / 'tie'
+        idx = max(1, min(3, self.round_idx)) - 1
+        self.round_results[idx] = winner if winner in ("human", "roo") else "tie"
+
+        # Freeze game updates & Push to the result page
+        self._freeze_for_overlay = True
+
+        from src.screen.screen_result import RoundResultScreen
+        kind = {"human": "win", "roo": "lose", "tie": "tie"}.get(winner, "tie")
+        is_match_over = (self.round_idx >= 3)
+        self.m.push(RoundResultScreen(
+            manager=self.m,
+            kind=kind,
+            round_idx=self.round_idx,
+            round_results=self.round_results,
+            on_continue=self._result_continue,
+            is_match_over=is_match_over
+        ))
+
+    def _result_continue(self):
+        # Back from result screen
+        if self.round_idx < 3:
+            now = pg.time.get_ticks()
+            self.round_idx += 1
+
+            # --- restore HP / stamina / lives ---
+            if hasattr(self.hp_h, "reset"):
+                self.hp_h.reset()
+            else:
+                # fallback if your HP object has no reset()
+                if hasattr(self.hp_h, "max"):
+                    self.hp_h.cur = self.hp_h.max
+                else:
+                    self.hp_h.cur = 100
+
+            if hasattr(self, "st_h") and hasattr(self.st_h, "reset"):
+                self.st_h.reset()
+            if hasattr(self, "st_r") and hasattr(self.st_r, "reset"):
+                self.st_r.reset()
+
+            # if you use "half hearts" for lives, also restore here
+            if hasattr(self, "max_lives_halves"):
+                self.lives_halves = self.max_lives_halves
+            elif hasattr(self, "lives_halves"):
+                # safe default
+                self.lives_halves = 6
+
+            # --- reset positions & facing ---
+            self.human.pos = (1, CFG.GRID_H // 2)
+            self.roo.pos = (CFG.GRID_W - 2, CFG.GRID_H // 2)
+            self.h_face = 1  # right
+            self.r_face = -1  # left
+
+            # --- clear temps & restart timer ---
+            self.float_msgs.clear()
+            self.debug_events.clear()
+            self.round_start = now
+            self.overtime_started = None
+
+            self._freeze_for_overlay = False
+
+        else:
+            # Match finished: go Home (or replace with End screen if you have one)
+            self._freeze_for_overlay = False
+            self.m.goto("home")
 
     # =====================  Draw  =====================
     def draw(self):
@@ -696,14 +755,14 @@ class GameScreen:
             fx, fy = self.sprite_r.fist_point(r_center, flip_h=(self.r_face > 0))
             pg.draw.circle(s, (230, 80, 80), (fx, fy), 5, 0)
 
-        # Center message（含 ♥ 的回退字库）
+        # Center message (with ♥ Rollback font library)
         if now < self.msg_until and self.msg_text:
             text = self.msg_text
             font = self.m.fonts["title"]
-            # 如果包含 ♥，尝试用包含符号的系统字库临时渲染
+            # If ♥ is included, try temporarily rendering with the system font library that contains the symbol
             if "♥" in text:
                 try:
-                    # 取与 title 大致相同字号
+                    # Use a font size roughly the same as the title
                     size_guess = font.get_height()
                     sym = pg.font.SysFont("Segoe UI Symbol", size_guess) or pg.font.SysFont("Arial Unicode MS",
                                                                                             size_guess)

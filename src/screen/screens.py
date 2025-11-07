@@ -37,7 +37,12 @@ class ScreenManager:
 
     # --- helpers ---
     def _make(self, name, **kwargs):
-        return self._routes[name](self, **kwargs)
+        # Supports both a string route name and an already-constructed Screen instance
+        if isinstance(name, str):
+            return self._routes[name](self, **kwargs)
+        else:
+            # Already a usable Screen object; return it directly
+            return name
 
     def current(self):
         return self.stack[-1] if self.stack else None

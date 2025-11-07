@@ -66,7 +66,7 @@ class PauseScreen:
         # draw button
         for text, rect in self.labels:
             pg.draw.rect(s, (200, 200, 210), rect, width=2, border_radius=10)
-            # --- 在按钮内部居中显示文字 ---
+            # --- Center text inside the button ---
             img = self.font_btn.render(text, True, (240, 240, 240))
             img_rect = img.get_rect(center=rect.center)
             s.blit(img, img_rect)
